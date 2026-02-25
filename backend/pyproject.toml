@@ -32,6 +32,7 @@ dependencies = [
     "pytz>=2024.1",
     "ujson>=5.10",
     "redis>=5.0",
+    "flask-cors>=6.0.2",
 ]
 
 [project.optional-dependencies]

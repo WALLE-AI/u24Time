@@ -169,13 +169,13 @@ class HotSearchNormalizer:
             return CanonicalItem(
                 item_id=item_id,
                 source_id=source_id,
-                source_type=SourceType.SOCIAL.value,   # 热搜归入 social 类型
+                source_type=SourceType.SOCIAL,   # 热搜归入 social 类型
                 title=title,
-                content=extra.get("hover", "") or raw.get("desc", ""),
+                body=extra.get("hover", "") or raw.get("desc", ""),
                 url=url,
                 published_at=published_at,
                 hotness_score=round(hotness_score, 2),
-                severity_level=severity.value,
+                severity_level=severity,
                 categories=categories,
                 geo_country=meta.get("geo"),
                 raw_engagement={"rank": rank, "raw_hotness": raw_hotness},

@@ -452,9 +452,15 @@ class NewsNowAdapter:
             resp = await client.get(
                 url,
                 headers={
-                    **HEADERS,
-                    "Accept": "application/json",
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
                     "Referer": self.base_url,
+                    "Connection": "keep-alive",
                 },
                 timeout=15,
             )
