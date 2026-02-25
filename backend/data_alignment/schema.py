@@ -1,0 +1,198 @@
+# -*- coding: utf-8 -*-
+"""
+DataAlignmentModel — CanonicalItem Schema
+所有数据源最终统一到此数据模型
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional
+
+
+# ─── 枚举常量 ─────────────────────────────────────────────────
+
+class SourceType:
+    SOCIAL = "social"
+    NEWS = "news"
+    GEO = "geo"
+    MILITARY = "military"
+    MARKET = "market"
+    CYBER = "cyber"
+    CLIMATE = "climate"
+
+
+class SeverityLevel:
+    INFO = "info"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+    _ORDER = {INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4}
+
+    @classmethod
+    def higher(cls, a: str, b: str) -> str:
+        """返回两者中更高的严重等级"""
+        return a if cls._ORDER.get(a, 0) >= cls._ORDER.get(b, 0) else b
+
+
+# ─── 核心统一数据模型 ─────────────────────────────────────────
+
+@dataclass
+class CanonicalItem:
+    """
+    统一标准化情报条目。
+
+    所有数据源（社交平台、RSS 新闻、地理事件、军事、市场、网络威胁、气候）
+    在经过对应 Normalizer 处理后，均产出此结构。
+    """
+
+    # ── 来源标识 ────────────────────────────────────────────
+    item_id: str                    # 全局唯一 ID: "{source_id}:{original_id}"
+    source_id: str                  # 数据源注册 ID，如 "social.bilibili"
+    source_type: str                # SourceType 中的值
+
+    # ── 内容 ───────────────────────────────────────────────
+    title: str                      # 标题或内容摘要（必须非空）
+    body: Optional[str] = None      # 正文
+    author: Optional[str] = None    # 作者 / 发布者
+    url: Optional[str] = None       # 原始链接
+
+    # ── 时间 (均为 UTC aware datetime) ─────────────────────
+    published_at: Optional[datetime] = None
+    crawled_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # ── 地理信息 ────────────────────────────────────────────
+    geo_lat: Optional[float] = None     # 纬度 (-90 ~ 90)
+    geo_lon: Optional[float] = None     # 经度 (-180 ~ 180)
+    geo_country: Optional[str] = None   # ISO-3166 国家码（两位大写）
+    geo_region: Optional[str] = None    # 地区名称
+
+    # ── 量化指标 ─────────────────────────────────────────────
+    hotness_score: float = 0.0          # 标准化热度分 [0, 100]
+    severity_level: str = SeverityLevel.INFO  # SeverityLevel 常量
+    sentiment: Optional[float] = None   # 情感分 [-1.0, 1.0]
+
+    # ── 原始平台数据快照 ─────────────────────────────────────
+    raw_engagement: dict = field(default_factory=dict)
+    raw_metadata: dict = field(default_factory=dict)
+
+    # ── 分类标签 ─────────────────────────────────────────────
+    categories: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
+
+    # ── AI 处理标记 ──────────────────────────────────────────
+    is_classified: bool = False
+    classification_source: str = ""  # "keyword" / "ml" / "llm"
+
+    def to_dict(self) -> dict:
+        """序列化为字典（JSON 友好）"""
+        return {
+            "item_id": self.item_id,
+            "source_id": self.source_id,
+            "source_type": self.source_type,
+            "title": self.title,
+            "body": self.body,
+            "author": self.author,
+            "url": self.url,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "crawled_at": self.crawled_at.isoformat(),
+            "geo_lat": self.geo_lat,
+            "geo_lon": self.geo_lon,
+            "geo_country": self.geo_country,
+            "geo_region": self.geo_region,
+            "hotness_score": round(self.hotness_score, 4),
+            "severity_level": self.severity_level,
+            "sentiment": self.sentiment,
+            "raw_engagement": self.raw_engagement,
+            "raw_metadata": self.raw_metadata,
+            "categories": self.categories,
+            "keywords": self.keywords,
+            "is_classified": self.is_classified,
+            "classification_source": self.classification_source,
+        }
+
+
+# ─── 热度计算工具 ─────────────────────────────────────────────
+
+class HotnessCalculator:
+    """
+    跨平台统一热度计算器。
+    借鉴 BettaFish MediaCrawlerDB 的加权算法，使用 log 压缩后归一化。
+    """
+
+    # 互动权重
+    W_LIKE: float = 1.0
+    W_COMMENT: float = 5.0
+    W_SHARE: float = 10.0
+    W_VIEW: float = 0.1
+    W_FAVORITE: float = 10.0
+    W_DANMAKU: float = 0.5
+
+    @classmethod
+    def compute_raw(cls, engagement: dict) -> float:
+        """计算原始加权热度值"""
+        return (
+            engagement.get("likes", 0) * cls.W_LIKE
+            + engagement.get("comments", 0) * cls.W_COMMENT
+            + engagement.get("shares", 0) * cls.W_SHARE
+            + engagement.get("views", 0) * cls.W_VIEW
+            + engagement.get("favorites", 0) * cls.W_FAVORITE
+            + engagement.get("danmaku", 0) * cls.W_DANMAKU
+        )
+
+    @classmethod
+    def normalize(cls, raw_score: float, max_score: float = 1_000_000.0) -> float:
+        """
+        log 压缩归一化到 [0, 100]
+        hotness = log10(1 + raw) / log10(1 + max) * 100
+        """
+        if raw_score <= 0:
+            return 0.0
+        result = math.log10(1 + raw_score) / math.log10(1 + max_score) * 100.0
+        return min(100.0, max(0.0, result))
+
+    @classmethod
+    def score(cls, engagement: dict, max_score: float = 1_000_000.0) -> float:
+        raw = cls.compute_raw(engagement)
+        return cls.normalize(raw, max_score)
+
+
+# ─── 关键词严重度分类器 ─────────────────────────────────────
+
+SEVERITY_KEYWORDS: dict[str, list[str]] = {
+    SeverityLevel.CRITICAL: [
+        "nuclear", "chemical weapon", "biological weapon", "mass casualties",
+        "terrorist attack", "coup d'état", "civil war", "genocide",
+        "核武器", "生化武器", "政变", "内战", "种族灭绝",
+    ],
+    SeverityLevel.HIGH: [
+        "explosion", "airstrike", "missile", "bombing", "military offensive",
+        "earthquake", "tsunami", "major flood", "wildfire", "pandemic",
+        "爆炸", "空袭", "导弹", "军事行动", "地震", "海啸", "洪灾",
+    ],
+    SeverityLevel.MEDIUM: [
+        "protest", "riot", "strike", "sanction", "cyberattack", "data breach",
+        "抗议", "罢工", "制裁", "网络攻击", "数据泄露",
+    ],
+    SeverityLevel.LOW: [
+        "warning", "alert", "investigation", "arrest", "fire",
+        "预警", "调查", "逮捕", "火灾",
+    ],
+}
+
+
+def classify_severity_by_keywords(text: str) -> tuple[str, str]:
+    """
+    通过关键词分类严重等级。
+    返回 (severity_level, classification_source)
+    """
+    text_lower = text.lower()
+    for level in [SeverityLevel.CRITICAL, SeverityLevel.HIGH, SeverityLevel.MEDIUM, SeverityLevel.LOW]:
+        for kw in SEVERITY_KEYWORDS.get(level, []):
+            if kw.lower() in text_lower:
+                return level, "keyword"
+    return SeverityLevel.INFO, "keyword"

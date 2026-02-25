@@ -1,0 +1,84 @@
+# ─── 敏感配置（绝对不能上传）───────────────────────────────────
+.env
+.env.local
+.env.*.local
+secrets.json
+*.key
+*.pem
+
+# 保留示例配置模板
+!.env.example
+
+# ─── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+wheels/
+*.egg-link
+MANIFEST
+
+# ─── 虚拟环境 / uv ─────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.uv/
+uv.lock          # 可选：若希望锁定依赖则删除此行
+
+# ─── 测试 / 覆盖率 ─────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.log
+*.out
+
+# ─── 数据库文件 ─────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ─── 爬虫运行时数据（不纳入版本控制）─────────────────────────────
+data/cookies/
+data/raw/
+data/cache/
+data/output/
+data/logs/
+
+# Playwright 状态存储
+playwright-state/
+browser_data/
+
+# ─── 日志 ──────────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── IDE / 编辑器 ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── 类型检查 / mypy ───────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# ─── 临时文件 ──────────────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.bak
