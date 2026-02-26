@@ -1,0 +1,121 @@
+:root {
+  --bg: #080808;
+  --panel-bg: #0c0c0c;
+  --header-bg: #0a0a0a;
+  --fg: #e0e0e0;
+  --accent: #ff5c00;
+  --border-color: #222;
+  --border: 2px solid var(--border-color);
+  --success: #34d399;
+  --error: #f87171;
+  --warn: #fbbf24;
+  --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-main);
+  overflow: hidden;
+  /* Main app uses internal scrolling */
+}
+
+/* ───────────────────────────────────── Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #333;
+}
+
+/* ───────────────────────────────────── Animations */
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: scale(0.95);
+  }
+}
+
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ───────────────────────────────────── Typography */
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 900;
+  letter-spacing: -0.5px;
+}
+
+/* ───────────────────────────────────── Components */
+.brutal-btn {
+  transition: all 0.1s ease;
+}
+
+.brutal-btn:hover {
+  border-color: #555 !important;
+  color: #fff !important;
+}
+
+.brutal-btn:active {
+  transform: translateY(1px);
+  background: #111 !important;
+}
+
+.realtime-console {
+  scrollbar-gutter: stable;
+}
+
+/* Selection */
+::selection {
+  background: var(--accent);
+  color: #fff;
+}

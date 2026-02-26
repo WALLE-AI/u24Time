@@ -172,10 +172,12 @@ def test_feodo_normalizer():
     }
     item = normalizer.normalize_feodo(row)
     assert item is not None
-    assert item.source_id == "cyber.feodo"
+    assert item.source_id == "tech.cyber.feodo"
     assert item.source_type == "cyber"
     assert item.severity_level == "high"  # status=online → HIGH
     assert "c2" in item.categories
+    assert item.domain == "technology"
+    assert item.sub_domain == "cyber"
 
 
 # ── Deduplicator ─────────────────────────────────────────────
@@ -230,10 +232,12 @@ def test_registry_by_type():
 
 def test_registry_get():
     from data_source.registry import registry
-    s = registry.get("geo.usgs")
+    s = registry.get("global.disaster.usgs")
     assert s is not None
-    assert s.name == "USGS Earthquakes"
+    assert "USGS" in s.name
     assert s.api_key_required is False
+    assert s.domain == "global"
+    assert s.sub_domain == "disaster"
 
 
 # ── RSS Sources ───────────────────────────────────────────────

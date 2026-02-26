@@ -35,17 +35,21 @@ class Settings(BaseSettings):
     # ─── Redis (Flask-SSE 依赖) ───────────────────────────────
     REDIS_URL: str = Field("redis://127.0.0.1:6379/0", description="Redis 连接 URL")
 
-    # ─── PostgreSQL ───────────────────────────────────────────
+    # ─── Database ───────────────────────────────────────────────
+    DB_TYPE: str = Field("sqlite", description="Database type (sqlite or postgres)")
     DB_HOST: str = Field("127.0.0.1", description="数据库主机")
     DB_PORT: int = Field(5432, description="数据库端口")
     DB_USER: str = Field("u24time", description="数据库用户名")
     DB_PASSWORD: str = Field("", description="数据库密码")
     DB_NAME: str = Field("u24time", description="数据库名称")
+    DB_SQLITE_PATH: str = Field("u24time.db", description="SQLite 数据库路径")
     DB_ECHO: bool = Field(False, description="SQLAlchemy SQL 日志")
 
     @property
     def database_url(self) -> str:
         """同步数据库 URL（用于 Alembic）"""
+        if self.DB_TYPE == "sqlite":
+            return f"sqlite:///{self.DB_SQLITE_PATH}"
         return (
             f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
@@ -54,6 +58,8 @@ class Settings(BaseSettings):
     @property
     def async_database_url(self) -> str:
         """异步数据库 URL（用于 SQLAlchemy asyncio）"""
+        if self.DB_TYPE == "sqlite":
+            return f"sqlite+aiosqlite:///{self.DB_SQLITE_PATH}"
         return (
             f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"

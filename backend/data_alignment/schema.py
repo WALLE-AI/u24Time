@@ -22,6 +22,43 @@ class SourceType:
     MARKET = "market"
     CYBER = "cyber"
     CLIMATE = "climate"
+    HOTSEARCH = "hotsearch"
+
+
+class DomainType:
+    """四大顶级领域"""
+    ECONOMY  = "economy"     # 经济域
+    TECH     = "technology"  # 技术域
+    ACADEMIC = "academic"    # 学术域
+    GLOBAL   = "global"      # 全球监控域
+
+
+class SubDomainType:
+    """各域下的子领域"""
+    # Economy
+    STOCK       = "stock"       # 股票预测
+    FUTURES     = "futures"     # 期货指数
+    QUANT       = "quant"       # 量化/宏观
+    TRADE       = "trade"       # 国际贸易
+    CRYPTO      = "crypto"      # 数字货币
+    # Technology
+    OSS         = "oss"         # 开源/开发者生态
+    CYBER       = "cyber"       # 网络安全
+    INFRA       = "infra"       # 互联网基础设施
+    AI_SERVICE  = "ai_service"  # AI 服务监控
+    # Academic
+    PAPER       = "paper"       # 研究论文
+    PATENT      = "patent"      # 专利
+    CONF        = "conference"  # 学术会议
+    PREDICTION  = "prediction"  # 预测市场
+    # Global Monitoring
+    CONFLICT    = "conflict"    # 武装冲突
+    MILITARY    = "military"    # 军事/海事
+    DIPLOMACY   = "diplomacy"   # 外交/制裁/多边主义
+    DISASTER    = "disaster"    # 自然灾害/气候
+    DISPLACEMENT= "displacement" # 人口流离失所
+    UNREST      = "unrest"      # 社会动荡
+    SOCIAL      = "social"      # 中文社交舆情
 
 
 class SeverityLevel:
@@ -80,6 +117,10 @@ class CanonicalItem:
     raw_engagement: dict = field(default_factory=dict)
     raw_metadata: dict = field(default_factory=dict)
 
+    # ── 领域分类 ────────────────────────────────────────────────
+    domain: str = ""          # DomainType 值，如 "economy"
+    sub_domain: str = ""      # SubDomainType 值，如 "stock"
+
     # ── 分类标签 ─────────────────────────────────────────────
     categories: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
@@ -109,6 +150,8 @@ class CanonicalItem:
             "sentiment": self.sentiment,
             "raw_engagement": self.raw_engagement,
             "raw_metadata": self.raw_metadata,
+            "domain": self.domain,
+            "sub_domain": self.sub_domain,
             "categories": self.categories,
             "keywords": self.keywords,
             "is_classified": self.is_classified,
@@ -159,6 +202,46 @@ class HotnessCalculator:
     def score(cls, engagement: dict, max_score: float = 1_000_000.0) -> float:
         raw = cls.compute_raw(engagement)
         return cls.normalize(raw, max_score)
+
+
+# ─── 经济领域元数据 ───────────────────────────────────────────
+
+@dataclass
+class EconomicMetadata:
+    """
+    经济域专属元数据，存储在 CanonicalItem.raw_metadata['economic'] 中。
+    适用于 stock / futures / quant / crypto 子域。
+    """
+    symbol: str = ""                      # 代码, e.g. "000001.SS", "BTC-USD"
+    price: Optional[float] = None         # 最新价格
+    change_pct: Optional[float] = None    # 24h/1d 涨跌幅 %
+    open_price: Optional[float] = None
+    high_price: Optional[float] = None
+    low_price: Optional[float] = None
+    volume: Optional[float] = None
+    market_cap: Optional[float] = None
+    currency: str = "CNY"
+    exchange: str = ""                    # "SSE"/"SZSE"/"NYSE"/"BINANCE"...
+    interval: str = "1d"                  # 时间粒度 1m/5m/1h/1d/1w
+    signal: Optional[str] = None         # 量化信号: BUY/SELL/HOLD/UNKNOWN/CASH
+    indicators: dict = field(default_factory=dict)  # SMA50/RSI/MACD/BBOLL...
+
+    def to_dict(self) -> dict:
+        return {
+            "symbol": self.symbol,
+            "price": self.price,
+            "change_pct": self.change_pct,
+            "open_price": self.open_price,
+            "high_price": self.high_price,
+            "low_price": self.low_price,
+            "volume": self.volume,
+            "market_cap": self.market_cap,
+            "currency": self.currency,
+            "exchange": self.exchange,
+            "interval": self.interval,
+            "signal": self.signal,
+            "indicators": self.indicators,
+        }
 
 
 # ─── 关键词严重度分类器 ─────────────────────────────────────

@@ -29,6 +29,9 @@ from loguru import logger
 from config import settings
 from crawler_engine.engine import CrawlerEngine
 from data_source.registry import registry
+from db.session import get_async_session
+from utils.llm_client import LLMClient
+from scheduler import DataScheduler
 
 
 # ─── Flask App 初始化 ──────────────────────────────────────────
@@ -40,8 +43,16 @@ CORS(app, origins="*")
 # ─── 全局对象 ─────────────────────────────────────────────────
 
 _engine = CrawlerEngine()
+_llm = LLMClient()
 _sse_clients: list[queue.Queue] = []
 _sse_lock = threading.Lock()
+
+# DataScheduler 初始化（借鉴 WorldMonitor 分层 TTL 策略）
+_scheduler = DataScheduler(
+    engine=_engine,
+    db_session_factory=None,   # 将在 App 启动后通过 _start_scheduler() 注入
+    broadcast_cb=None,         # SSE 回调将在下方注入
+)
 
 
 # ─── SSE 支持 ─────────────────────────────────────────────────
@@ -95,8 +106,30 @@ def sse_stream():
     )
 
 
-# ─── 注入 SSE 回调到 CrawlerEngine ────────────────────────────
+# ─── 注入 SSE 回调到 CrawlerEngine 和 Scheduler ───────────
 _engine.set_progress_callback(_broadcast)
+_scheduler._broadcast = _broadcast
+
+
+# ─── 调度器启动（Flask 首次请求后自动触发）──────────────────
+_scheduler_started = False
+
+
+@app.before_request
+def _ensure_scheduler():
+    """在第一次请求时启动调度器（避免多进程 debug 模式重复启动）"""
+    global _scheduler_started
+    if not _scheduler_started:
+        _scheduler_started = True
+        try:
+            _scheduler.start()
+            logger.info("DataScheduler: 首次请求后启动成功")
+        except Exception as e:
+            logger.error(f"DataScheduler 启动失败: {e}")
+
+
+import atexit
+atexit.register(_scheduler.shutdown)
 
 
 # ─── 异步任务运行工具 ─────────────────────────────────────────
@@ -136,6 +169,36 @@ def err(msg: str, code: int = 400):
 @app.route("/health")
 def health():
     return ok(msg="U24Time Backend is running")
+
+
+# ══════════════════════════════════════════════════════════════
+# Scheduler Routes (WorldMonitor 分层 TTL 调度管理)
+# ══════════════════════════════════════════════════════════════
+
+@app.route("/api/v1/scheduler/status")
+def scheduler_status():
+    """查看后台采集调度器状态（各任务下次执行时间、stale cache 信息）"""
+    return ok(data=_scheduler.status())
+
+
+@app.route("/api/v1/scheduler/trigger/<path:source_id>", methods=["POST"])
+def scheduler_trigger(source_id: str):
+    """手动立即触发指定数据源的采集任务"""
+    from scheduler import SOURCE_SCHEDULE
+    if source_id not in SOURCE_SCHEDULE and source_id not in [
+        "geo.usgs", "geo.acled", "geo.gdelt", "geo.nasa_firms",
+        "military.opensky", "cyber.feodo", "cyber.urlhaus", "market.coingecko",
+    ]:
+        return err(f"Unknown source_id: {source_id}. Check /api/v1/scheduler/status for valid IDs.", 404)
+    _scheduler.trigger(source_id)
+    return ok(msg=f"Triggered {source_id} — watch /stream for results")
+
+
+@app.route("/api/v1/scheduler/trigger-all", methods=["POST"])
+def scheduler_trigger_all():
+    """触发全量数据刷新（谨慎使用）"""
+    _scheduler.trigger_all_now()
+    return ok(msg=f"Full refresh triggered for {len(_scheduler.status()['total_jobs'])} sources")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -215,12 +278,13 @@ def crawl_rss():
     feed_ids = body.get("feed_ids")
 
     async def _run():
-        items = await _engine.run_rss(category=category, feed_ids=feed_ids)
-        _broadcast({
-            "event": "rss_complete",
-            "category": category,
-            "items_count": len(items),
-        })
+        async with get_async_session() as session:
+            items = await _engine.run_rss(category=category, feed_ids=feed_ids, db_session=session)
+            _broadcast({
+                "event": "rss_complete",
+                "category": category,
+                "items_count": len(items),
+            })
 
     _run_async(_run())
     return ok(msg="RSS crawl task started", category=category)
@@ -245,12 +309,13 @@ def crawl_api():
         return err(f"Unknown source_id: {source_id}", 404)
 
     async def _run():
-        items = await _engine.run_api(source_id, **params)
-        _broadcast({
-            "event": "api_crawl_complete",
-            "source_id": source_id,
-            "items_count": len(items),
-        })
+        async with get_async_session() as session:
+            items = await _engine.run_api(source_id, db_session=session, **params)
+            _broadcast({
+                "event": "api_crawl_complete",
+                "source_id": source_id,
+                "items_count": len(items),
+            })
 
     _run_async(_run())
     return ok(msg=f"API crawl task started for {source_id}", source_id=source_id)
@@ -260,9 +325,10 @@ def crawl_api():
 def crawl_all():
     """触发全量采集（所有 API 源 + RSS + 热搜）"""
     async def _run():
-        results = await _engine.run_all()
-        total = sum(len(v) for v in results.values())
-        _broadcast({"event": "full_crawl_complete", "total_items": total})
+        async with get_async_session() as session:
+            results = await _engine.run_all(db_session=session)
+            total = sum(len(v) for v in results.values())
+            _broadcast({"event": "full_crawl_complete", "total_items": total})
 
     _run_async(_run())
     return ok(msg="Full crawl started")
@@ -279,12 +345,13 @@ def crawl_hotsearch():
     source_ids = body.get("source_ids")  # Optional list like ["hotsearch.weibo", ...]
 
     async def _run():
-        items = await _engine.run_hotsearch(source_ids=source_ids)
-        _broadcast({
-            "event": "hotsearch_complete",
-            "sources_count": len(set(i.source_id for i in items)) if items else 0,
-            "items_count": len(items),
-        })
+        async with get_async_session() as session:
+            items = await _engine.run_hotsearch(source_ids=source_ids, db_session=session)
+            _broadcast({
+                "event": "hotsearch_complete",
+                "sources_count": len(set(i.source_id for i in items)) if items else 0,
+                "items_count": len(items),
+            })
 
     _run_async(_run())
     return ok(
@@ -357,6 +424,8 @@ def list_items():
                 "geo_lon": r.geo_lon,
                 "geo_country": r.geo_country,
                 "categories": r.categories,
+                "domain": r.domain,
+                "sub_domain": r.sub_domain,
             }
             for r in rows
         ]
@@ -379,6 +448,161 @@ def not_found(e):
 @app.errorhandler(500)
 def server_error(e):
     return err(f"Internal server error: {str(e)}", 500)
+
+
+# ══════════════════════════════════════════════════════════════
+# Domain Routes — v1
+# ══════════════════════════════════════════════════════════════
+
+@app.route("/api/v1/domains", methods=["GET"])
+def list_domains():
+    """返回4个域及各自源统计"""
+    summary = registry.domain_summary()
+    domain_meta = {
+        "economy":    {"emoji": "💹", "name": "Economy",          "name_cn": "经济"},
+        "technology": {"emoji": "💻", "name": "Technology",       "name_cn": "技术"},
+        "academic":   {"emoji": "🎓", "name": "Academic",         "name_cn": "学术"},
+        "global":     {"emoji": "🌍", "name": "Global Monitoring","name_cn": "全球监控"},
+    }
+    result = []
+    for domain, stats in summary.items():
+        meta = domain_meta.get(domain, {"emoji": "📦", "name": domain, "name_cn": domain})
+        result.append({
+            "domain": domain,
+            **meta,
+            "source_count": stats["count"],
+            "sub_domains": stats["sub_domains"],
+        })
+    return ok(domains=result, total_sources=len(registry.all()))
+
+
+@app.route("/api/v1/domains/<domain>/sources", methods=["GET"])
+def domain_sources(domain: str):
+    """返回指定域下所有数据源"""
+    sources = registry.by_domain(domain)
+    if not sources:
+        return err(f"Domain '{domain}' not found or has no sources", 404)
+    return ok(
+        domain=domain,
+        sources=[
+            {
+                "source_id": s.source_id,
+                "name": s.name,
+                "sub_domain": s.sub_domain,
+                "source_type": s.source_type,
+                "crawl_method": s.crawl_method,
+                "is_enabled": s.is_enabled,
+                "status": s.status,
+                "tags": s.tags,
+            }
+            for s in sources
+        ],
+        count=len(sources),
+    )
+
+
+@app.route("/api/v1/domains/<domain>/items", methods=["GET"])
+def domain_items(domain: str):
+    """按域查询 CanonicalItem（需要 DB 支持）"""
+    limit = min(int(request.args.get("limit", 50)), 200)
+    offset = int(request.args.get("offset", 0))
+
+    try:
+        from db import get_db
+        db = get_db()
+        items = db.query_items_by_domain(domain=domain, limit=limit, offset=offset)
+        return ok(domain=domain, items=[i.to_dict() for i in items], count=len(items))
+    except Exception as e:
+        logger.warning(f"DB not available for domain query: {e}")
+        # 返回空结果而非错误
+        return ok(domain=domain, items=[], count=0, note="DB not available")
+
+
+@app.route("/api/v1/domains/<domain>/<sub>/items", methods=["GET"])
+def sub_domain_items(domain: str, sub: str):
+    """按子域查询 CanonicalItem"""
+    limit = min(int(request.args.get("limit", 50)), 200)
+    offset = int(request.args.get("offset", 0))
+
+    try:
+        from db import get_db
+        db = get_db()
+        items = db.query_items_by_domain(domain=domain, sub_domain=sub, limit=limit, offset=offset)
+        return ok(domain=domain, sub_domain=sub, items=[i.to_dict() for i in items], count=len(items))
+    except Exception as e:
+        logger.warning(f"DB not available for sub-domain query: {e}")
+        return ok(domain=domain, sub_domain=sub, items=[], count=0, note="DB not available")
+
+
+@app.route("/api/v1/crawl/domain/<domain>", methods=["POST"])
+def crawl_domain(domain: str):
+    """触发整个域的采集任务"""
+    sources = registry.by_domain(domain)
+    if not sources:
+        return err(f"Domain '{domain}' not found or has no sources", 404)
+
+    enabled = [s for s in sources if s.is_enabled]
+    if not enabled:
+        return err(f"No enabled sources in domain '{domain}'", 400)
+
+    launched = [s.source_id for s in enabled]
+    async def _run():
+        async with get_async_session() as session:
+            for source in enabled:
+                try:
+                    if source.crawl_method == "rss":
+                        await _engine.run_rss(feed_ids=[source.source_id.replace("news.rss.", "")], db_session=session)
+                    elif source.crawl_method in ("api", "lib"):
+                        await _engine.run_api(source.source_id, db_session=session)
+                except Exception as e:
+                    logger.warning(f"Failed to crawl {source.source_id}: {e}")
+
+    _run_async(_run())
+    return ok(
+        msg=f"Domain crawl launched for '{domain}'",
+        domain=domain,
+        launched=launched,
+        total=len(launched),
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# AI Summary Routes
+# ══════════════════════════════════════════════════════════════
+
+@app.route("/api/v1/ai/summary", methods=["POST"])
+async def ai_summary():
+    """
+    生成当前情报摘要，按领域划分。
+    """
+    limit = min(int(request.args.get("limit", 40)), 100)
+    
+    # 获取待摘要的内容
+    domain_groups: dict[str, list[dict]] = {}
+    try:
+        from db.session import get_sync_session
+        from db.models import CanonicalItemModel
+        from sqlalchemy import select, desc
+        
+        with get_sync_session() as session:
+            stmt = select(CanonicalItemModel).order_by(desc(CanonicalItemModel.crawled_at)).limit(limit)
+            rows = session.scalars(stmt).all()
+            
+            for r in rows:
+                d = r.domain or "other"
+                if d not in domain_groups:
+                    domain_groups[d] = []
+                domain_groups[d].append({"title": r.title, "body": r.body, "source_id": r.source_id})
+                
+    except Exception as e:
+        logger.warning(f"AI Summary: 从 DB 获取数据失败: {e}")
+        return err(f"Database error: {str(e)}", 500)
+
+    if not domain_groups:
+        return err("No items available for summarization", 400)
+
+    summary = await _llm.generate_summary(domain_groups)
+    return ok(summary=summary, domains_count=len(domain_groups))
 
 
 # ══════════════════════════════════════════════════════════════

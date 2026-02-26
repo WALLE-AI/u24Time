@@ -15,6 +15,8 @@ from data_alignment.schema import (
     CanonicalItem,
     SourceType,
     SeverityLevel,
+    DomainType,
+    SubDomainType,
 )
 
 
@@ -53,8 +55,10 @@ class MilitaryNormalizer:
 
         return CanonicalItem(
             item_id=item_id,
-            source_id="military.opensky",
+            source_id="global.military.opensky",
             source_type=SourceType.MILITARY,
+            domain=DomainType.GLOBAL,
+            sub_domain=SubDomainType.MILITARY,
             title=title,
             body=None,
             author=None,
@@ -99,8 +103,10 @@ class MilitaryNormalizer:
 
         return CanonicalItem(
             item_id=item_id,
-            source_id="military.ais",
+            source_id="global.military.ais",
             source_type=SourceType.MILITARY,
+            domain=DomainType.GLOBAL,
+            sub_domain=SubDomainType.MILITARY,
             title=title,
             body=None,
             author=None,
@@ -160,8 +166,10 @@ class MarketNormalizer:
 
         return CanonicalItem(
             item_id=item_id,
-            source_id="market.coingecko",
+            source_id="economy.crypto.coingecko",
             source_type=SourceType.MARKET,
+            domain=DomainType.ECONOMY,
+            sub_domain=SubDomainType.CRYPTO,
             title=title,
             body=None,
             author="CoinGecko",
@@ -223,8 +231,10 @@ class CyberNormalizer:
 
         return CanonicalItem(
             item_id=item_id,
-            source_id="cyber.feodo",
+            source_id="tech.cyber.feodo",
             source_type=SourceType.CYBER,
+            domain=DomainType.TECH,
+            sub_domain=SubDomainType.CYBER,
             title=title,
             body=None,
             author="Feodo Tracker",
@@ -274,8 +284,10 @@ class CyberNormalizer:
 
         return CanonicalItem(
             item_id=item_id,
-            source_id="cyber.urlhaus",
+            source_id="tech.cyber.urlhaus",
             source_type=SourceType.CYBER,
+            domain=DomainType.TECH,
+            sub_domain=SubDomainType.CYBER,
             title=title,
             body=None,
             author="URLhaus",

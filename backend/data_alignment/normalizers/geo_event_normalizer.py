@@ -239,3 +239,108 @@ class GeoEventNormalizer:
             is_classified=True,
             classification_source=cls_src,
         )
+
+    def normalize_reliefweb(self, item: dict, source_id: str = "global.conflict.humanitarian") -> Optional[CanonicalItem]:
+        """
+        ReliefWeb API /v1/disasters or /v1/reports item → CanonicalItem.
+        文档: https://api.reliefweb.int/v1/disasters
+        """
+        try:
+            from data_alignment.schema import DomainType, SubDomainType
+            fields = item.get("fields", item)
+            rw_id = str(item.get("id", fields.get("id", "")))
+            title = fields.get("name", fields.get("title", {}).get("value", ""))
+            if not title:
+                return None
+            url = fields.get("url", f"https://reliefweb.int/disaster/{rw_id}")
+            date_str = fields.get("date", {}).get("event") or fields.get("date", {}).get("created", "")
+            published_at = _parse_iso_date(date_str) if date_str else None
+            status = fields.get("status", "")
+            country_list = fields.get("country", [])
+            geo_country = country_list[0].get("iso3") if country_list else None
+
+            severity_map = {"alert": SeverityLevel.HIGH, "ongoing": SeverityLevel.MEDIUM, "past": SeverityLevel.LOW}
+            severity = severity_map.get(status.lower(), SeverityLevel.INFO)
+            kw_sev, _ = classify_severity_by_keywords(title)
+            from data_alignment.schema import SeverityLevel as SL
+            severity = SL.higher(severity, kw_sev)
+
+            return CanonicalItem(
+                item_id=f"{source_id}:{rw_id}",
+                source_id=source_id,
+                source_type=SourceType.GEO,
+                domain=DomainType.GLOBAL,
+                sub_domain=SubDomainType.CONFLICT,
+                title=f"[人道危机] {title}",
+                url=url,
+                published_at=published_at,
+                geo_country=geo_country,
+                severity_level=severity,
+                raw_metadata={"rw_id": rw_id, "status": status, "countries": country_list},
+                categories=["humanitarian", "crisis", "reliefweb"],
+                is_classified=True,
+                classification_source="reliefweb_status",
+            )
+        except Exception as e:
+            logger.warning(f"normalize_reliefweb failed: {e}")
+            return None
+
+    def normalize_nasa_firms(self, row: dict, source_id: str = "global.disaster.nasa_firms") -> Optional[CanonicalItem]:
+        """
+        NASA FIRMS CSV row dict → CanonicalItem.
+        文档: https://firms.modaps.eosdis.nasa.gov/api/
+        """
+        try:
+            from data_alignment.schema import DomainType, SubDomainType
+            lat = row.get("latitude")
+            lon = row.get("longitude")
+            if lat is None or lon is None:
+                return None
+
+            bright_t = float(row.get("bright_t31", row.get("brightness", 300)))
+            frp = float(row.get("frp", 0))
+            acq_date = row.get("acq_date", "")
+            acq_time = row.get("acq_time", "")
+            country_id = row.get("country_id", "")
+            satellite = row.get("satellite", "VIIRS")
+
+            # FRP (Fire Radiative Power, MW) → severity
+            severity = SeverityLevel.CRITICAL if frp >= 1000 else \
+                       SeverityLevel.HIGH if frp >= 100 else \
+                       SeverityLevel.MEDIUM if frp >= 10 else SeverityLevel.LOW
+
+            title = f"[野火] {satellite} 火点检测 FRP={frp:.0f}MW @ ({float(lat):.2f},{float(lon):.2f})"
+            if country_id:
+                title += f" [{country_id}]"
+
+            import hashlib
+            raw = f"{lat}:{lon}:{acq_date}:{acq_time}"
+            item_id = hashlib.md5(raw.encode()).hexdigest()[:16]
+
+            return CanonicalItem(
+                item_id=item_id,
+                source_id=source_id,
+                source_type=SourceType.GEO,
+                domain=DomainType.GLOBAL,
+                sub_domain=SubDomainType.DISASTER,
+                title=title,
+                published_at=_parse_iso_date(acq_date),
+                geo_lat=float(lat),
+                geo_lon=float(lon),
+                geo_country=country_id or None,
+                severity_level=severity,
+                raw_metadata={
+                    "frp_mw": frp,
+                    "brightness": bright_t,
+                    "satellite": satellite,
+                    "acq_date": acq_date,
+                    "acq_time": acq_time,
+                },
+                categories=["wildfire", "nasa", "fire"],
+                is_classified=True,
+                classification_source="frp_threshold",
+            )
+        except Exception as e:
+            logger.warning(f"normalize_nasa_firms failed: {e}")
+            return None
+

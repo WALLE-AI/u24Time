@@ -5,7 +5,7 @@ description = "U24Time Backend - Crawler Engine, Data Source & Alignment"
 requires-python = ">=3.12"
 dependencies = [
     # Web Framework
-    "flask>=3.1",
+    "flask[async]>=3.1",
     "flask-sse>=1.0",
     "gunicorn>=23.0",
     # Config & Validation
@@ -33,6 +33,8 @@ dependencies = [
     "ujson>=5.10",
     "redis>=5.0",
     "flask-cors>=6.0.2",
+    "psycopg2-binary>=2.9.11",
+    "apscheduler>=3.11.2",
 ]
 
 [project.optional-dependencies]

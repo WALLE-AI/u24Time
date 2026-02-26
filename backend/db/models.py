@@ -67,7 +67,40 @@ class CanonicalItemModel(Base):
     is_classified: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否已分类")
     classification_source: Mapped[str] = mapped_column(String(16), default="", comment="分类来源: keyword/ml/llm")
 
+    # ─── 领域分类 (4-Domain Architecture) ──────────────────────
+    domain: Mapped[str] = mapped_column(String(32), default="", comment="顶级领域: economy/technology/academic/global")
+    sub_domain: Mapped[str] = mapped_column(String(64), default="", comment="子领域")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "item_id": self.item_id,
+            "source_id": self.source_id,
+            "source_type": self.source_type,
+            "title": self.title,
+            "body": self.body,
+            "author": self.author,
+            "url": self.url,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "crawled_at": self.crawled_at.isoformat(),
+            "geo_lat": self.geo_lat,
+            "geo_lon": self.geo_lon,
+            "geo_country": self.geo_country,
+            "geo_region": self.geo_region,
+            "hotness_score": self.hotness_score,
+            "severity_level": self.severity_level,
+            "sentiment": self.sentiment,
+            "raw_engagement": self.raw_engagement,
+            "raw_metadata": self.raw_metadata,
+            "categories": self.categories,
+            "keywords": self.keywords,
+            "domain": self.domain,
+            "sub_domain": self.sub_domain,
+            "is_classified": self.is_classified,
+            "created_at": self.created_at.isoformat()
+        }
 
     __table_args__ = (
         UniqueConstraint("item_id", name="uq_canonical_item_id"),
@@ -77,6 +110,8 @@ class CanonicalItemModel(Base):
         Index("ix_canonical_hotness", "hotness_score"),
         Index("ix_canonical_severity", "severity_level"),
         Index("ix_canonical_geo", "geo_lat", "geo_lon"),
+        Index("ix_canonical_domain", "domain"),
+        Index("ix_canonical_sub_domain", "sub_domain"),
     )
 
 

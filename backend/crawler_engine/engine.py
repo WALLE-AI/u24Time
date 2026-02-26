@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Optional, Callable
 
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession
+from db.models import CrawlTaskModel
 
 from crawler_engine.news.rss_fetcher import RSSFetcher
 from crawler_engine.news.rss_sources import ALL_RSS_FEEDS
@@ -95,6 +97,7 @@ class CrawlerEngine:
         self,
         category: Optional[str] = None,
         feed_ids: Optional[list[str]] = None,
+        db_session: Optional[AsyncSession] = None,
     ) -> list[CanonicalItem]:
         """
         采集 RSS 新闻并对齐。
@@ -124,10 +127,11 @@ class CrawlerEngine:
 
             for feed, entries in results:
                 source_id = f"news.rss.{feed.feed_id}"
-                items = self._pipeline.align(
+                items = await self._pipeline.align_and_save(
                     source_id=source_id,
                     raw_data=entries,
                     meta={"feed_category": feed.category},
+                    db_session=db_session,
                 )
                 all_items.extend(items)
 
@@ -140,6 +144,25 @@ class CrawlerEngine:
             logger.error(f"CrawlerEngine RSS 失败: {e}")
         finally:
             task.finished_at = datetime.now(timezone.utc)
+            if db_session:
+                try:
+                    task_model = CrawlTaskModel(
+                        task_id=task.task_id,
+                        source_id="rss.all" if not feed_ids else ",".join(feed_ids),
+                        task_type="rss",
+                        params={"category": category},
+                        status=task.status,
+                        items_fetched=task.items_fetched,
+                        items_aligned=task.items_aligned,
+                        error_message=task.error_message,
+                        started_at=task.started_at,
+                        finished_at=task.finished_at,
+                    )
+                    db_session.add(task_model)
+                    await db_session.commit()
+                except Exception as e:
+                    logger.error(f"Failed to save CrawlTask to DB: {e}")
+
             self._emit({
                 "event": "task_done",
                 "task_id": task.task_id,
@@ -152,7 +175,7 @@ class CrawlerEngine:
 
     # ─── API 采集 ────────────────────────────────────────────
 
-    async def run_api(self, source_id: str, **kwargs) -> list[CanonicalItem]:
+    async def run_api(self, source_id: str, db_session: Optional[AsyncSession] = None, **kwargs) -> list[CanonicalItem]:
         """
         运行指定 source_id 对应的 API 采集器。
 
@@ -227,10 +250,10 @@ class CrawlerEngine:
                 all_items: list[CanonicalItem] = []
                 for row in raw_data:
                     coin_id = row.pop("coin_id", "unknown")
-                    items = self._pipeline.align(source_id, [row], meta={"coin_id": coin_id})
+                    items = await self._pipeline.align_and_save(source_id, [row], meta={"coin_id": coin_id}, db_session=db_session)
                     all_items.extend(items)
             else:
-                all_items = self._pipeline.align(source_id, raw_data, meta)
+                all_items = await self._pipeline.align_and_save(source_id, raw_data, meta, db_session=db_session)
 
             task.items_aligned = len(all_items)
             task.status = "done"
@@ -243,6 +266,25 @@ class CrawlerEngine:
             logger.error(f"CrawlerEngine API {source_id} 失败: {e}")
         finally:
             task.finished_at = datetime.now(timezone.utc)
+            if db_session:
+                try:
+                    task_model = CrawlTaskModel(
+                        task_id=task.task_id,
+                        source_id=source_id,
+                        task_type="api",
+                        params=kwargs,
+                        status=task.status,
+                        items_fetched=task.items_fetched,
+                        items_aligned=task.items_aligned,
+                        error_message=task.error_message,
+                        started_at=task.started_at,
+                        finished_at=task.finished_at,
+                    )
+                    db_session.add(task_model)
+                    await db_session.commit()
+                except Exception as e:
+                    logger.error(f"Failed to save CrawlTask to DB: {e}")
+
             self._emit({
                 "event": "task_done",
                 "task_id": task.task_id,
@@ -259,6 +301,7 @@ class CrawlerEngine:
     async def run_hotsearch(
         self,
         source_ids: Optional[list[str]] = None,
+        db_session: Optional[AsyncSession] = None,
     ) -> list[CanonicalItem]:
         """
         采集 BettaFish NewsNow 聚合热搜数据并对齐。
@@ -281,10 +324,11 @@ class CrawlerEngine:
             task.items_fetched = sum(len(v.get("items", [])) for v in batch.values())
 
             for sid, response in batch.items():
-                items = self._pipeline.align(
+                items = await self._pipeline.align_and_save(
                     source_id=sid,
                     raw_data=[response],   # pipeline expects list[dict]
                     meta={},
+                    db_session=db_session,
                 )
                 all_items.extend(items)
 
@@ -300,6 +344,25 @@ class CrawlerEngine:
             logger.error(f"CrawlerEngine HotSearch 失败: {e}")
         finally:
             task.finished_at = datetime.now(timezone.utc)
+            if db_session:
+                try:
+                    task_model = CrawlTaskModel(
+                        task_id=task.task_id,
+                        source_id="hotsearch.all" if not source_ids else ",".join(source_ids),
+                        task_type="hotsearch",
+                        params={},
+                        status=task.status,
+                        items_fetched=task.items_fetched,
+                        items_aligned=task.items_aligned,
+                        error_message=task.error_message,
+                        started_at=task.started_at,
+                        finished_at=task.finished_at,
+                    )
+                    db_session.add(task_model)
+                    await db_session.commit()
+                except Exception as e:
+                    logger.error(f"Failed to save CrawlTask to DB: {e}")
+
             self._emit({
                 "event": "task_done",
                 "task_id": task.task_id,
@@ -312,7 +375,7 @@ class CrawlerEngine:
 
     # ─── 全量采集 (all sources) ───────────────────────────────
 
-    async def run_all(self) -> dict[str, list[CanonicalItem]]:
+    async def run_all(self, db_session: Optional[AsyncSession] = None) -> dict[str, list[CanonicalItem]]:
         """并发运行所有 API 数据源采集（不含 Playwright 社交爬虫）"""
         api_sources = [
             "geo.usgs", "geo.gdelt", "geo.nasa_firms",
@@ -322,11 +385,11 @@ class CrawlerEngine:
         results: dict[str, list[CanonicalItem]] = {}
 
         async def _run(sid: str):
-            results[sid] = await self.run_api(sid)
+            results[sid] = await self.run_api(sid, db_session=db_session)
 
         await asyncio.gather(*[_run(sid) for sid in api_sources], return_exceptions=True)
-        results["rss"] = await self.run_rss()
-        results["hotsearch"] = await self.run_hotsearch()
+        results["rss"] = await self.run_rss(db_session=db_session)
+        results["hotsearch"] = await self.run_hotsearch(db_session=db_session)
         return results
 
     # ─── 任务状态查询 ────────────────────────────────────────
