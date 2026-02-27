@@ -122,8 +122,10 @@ def _ensure_scheduler():
     if not _scheduler_started:
         _scheduler_started = True
         try:
+            # 注入异步 Session 工厂
+            _scheduler._db_factory = get_async_session
             _scheduler.start()
-            logger.info("DataScheduler: 首次请求后启动成功")
+            logger.info("DataScheduler: 首次请求后启动成功 (已注入 DB Factory)")
         except Exception as e:
             logger.error(f"DataScheduler 启动失败: {e}")
 
@@ -395,12 +397,15 @@ def list_items():
 
         source_type = request.args.get("source_type")
         source_id = request.args.get("source_id")
+        domain = request.args.get("domain")
         severity = request.args.get("severity")
         page = max(1, int(request.args.get("page", 1)))
         limit = min(200, max(1, int(request.args.get("limit", 50))))
 
         with get_sync_session() as session:
             stmt = select(CanonicalItemModel).order_by(desc(CanonicalItemModel.hotness_score))
+            if domain and domain != "all":
+                stmt = stmt.where(CanonicalItemModel.domain == domain)
             if source_type:
                 stmt = stmt.where(CanonicalItemModel.source_type == source_type)
             if source_id:
@@ -575,7 +580,11 @@ async def ai_summary():
     """
     生成当前情报摘要，按领域划分。
     """
-    limit = min(int(request.args.get("limit", 40)), 100)
+    domain = request.args.get("domain")
+    limit_val = int(request.args.get("limit", 40))
+    if domain and domain != "all":
+        limit_val = max(limit_val, 80)  # 如果是单领域，取更多条目以保证综述深度
+    limit = min(limit_val, 150)
     
     # 获取待摘要的内容
     domain_groups: dict[str, list[dict]] = {}
@@ -585,23 +594,32 @@ async def ai_summary():
         from sqlalchemy import select, desc
         
         with get_sync_session() as session:
-            stmt = select(CanonicalItemModel).order_by(desc(CanonicalItemModel.crawled_at)).limit(limit)
+            # 优先按热度排序，获取最有价值的情报
+            stmt = select(CanonicalItemModel).order_by(desc(CanonicalItemModel.hotness_score), desc(CanonicalItemModel.crawled_at))
+            if domain and domain != "all":
+                stmt = stmt.where(CanonicalItemModel.domain == domain)
+            stmt = stmt.limit(limit)
             rows = session.scalars(stmt).all()
             
             for r in rows:
                 d = r.domain or "other"
                 if d not in domain_groups:
                     domain_groups[d] = []
-                domain_groups[d].append({"title": r.title, "body": r.body, "source_id": r.source_id})
+                domain_groups[d].append({
+                    "title": r.title,
+                    "body": r.body,
+                    "source_id": r.source_id,
+                    "hotness": r.hotness_score
+                })
                 
     except Exception as e:
         logger.warning(f"AI Summary: 从 DB 获取数据失败: {e}")
         return err(f"Database error: {str(e)}", 500)
 
     if not domain_groups:
-        return err("No items available for summarization", 400)
+        return err(f"No items available for domain '{domain or 'all'}' summarization", 400)
 
-    summary = await _llm.generate_summary(domain_groups)
+    summary = await _llm.generate_summary(domain_groups, target_domain=domain)
     return ok(summary=summary, domains_count=len(domain_groups))
 
 

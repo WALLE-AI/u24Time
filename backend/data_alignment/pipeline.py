@@ -90,11 +90,12 @@ class AlignmentPipeline:
         self._emit({"event": "align_start", "source_id": source_id, "total": len(raw_data)})
 
         try:
-            items = self._dispatch(source_id, raw_data, meta)
-            
-            # Enrich with domain info from registry if not already set
             from data_source.registry import registry
             config = registry.get(source_id)
+            
+            items = self._dispatch(source_id, raw_data, meta, config)
+            
+            # Enrich with domain info from registry if not already set
             if config:
                 for item in items:
                     if not item.domain:
@@ -122,32 +123,36 @@ class AlignmentPipeline:
 
         return items
 
-    def _dispatch(self, source_id: str, rows: list[dict], meta: dict) -> list[CanonicalItem]:
-        """根据 source_id 分发到对应 Normalizer"""
+    def _dispatch(self, source_id: str, rows: list[dict], meta: dict, config=None) -> list[CanonicalItem]:
+        """根据 source_id 或 config 分发到对应 Normalizer"""
 
+        # 1. 优先根据 config 中的 crawl_method 分发
+        if config:
+            if config.crawl_method == "rss":
+                feed_category = meta.get("feed_category", config.domain or "news")
+                return self._news.normalize_batch_from_feedparser(rows, source_id, feed_category)
+            
+            if config.source_type == "hotsearch" or source_id.endswith("_newsnow"):
+                # raw_data 由 NewsNowAdapter.fetch_all() 返回的整个响应 dict 列表
+                if len(rows) == 1 and isinstance(rows[0], dict) and "items" in rows[0]:
+                    return self._hotsearch.normalize_batch(rows[0], source_id)
+                return self._hotsearch.normalize_batch({"items": rows}, source_id)
+
+        # 2. 回退到基于 source_id 的启发式规则 (用于支持未注册或旧式 ID)
+        
         # ── 社交平台 ────────────────────────────────────────
         if source_id.startswith("social."):
             platform = source_id.split(".", 1)[1]  # e.g. "bilibili"
             return self._social.normalize_batch(rows, platform)
 
-        # ── 新闻 RSS ────────────────────────────────────────
+        # ── 新闻 RSS (旧式或者 fallback) ─────────────────────
         if source_id.startswith("news.rss."):
             feed_category = meta.get("feed_category", "news")
-            items = []
-            for row in rows:
-                item = self._news.normalize_from_feedparser(row, source_id, feed_category)
-                if item:
-                    items.append(item)
-            return items
+            return self._news.normalize_batch_from_feedparser(rows, source_id, feed_category)
 
         # ── arXiv / 学术 RSS (academic.arxiv.*) ─────────────
         if source_id.startswith("academic.arxiv."):
-            items = []
-            for row in rows:
-                item = self._news.normalize_from_feedparser(row, source_id, "academic")
-                if item:
-                    items.append(item)
-            return items
+            return self._news.normalize_batch_from_feedparser(rows, source_id, "academic")
 
         # ── HuggingFace 每日论文 ──────────────────────────────
         if source_id == "academic.huggingface.papers":
@@ -342,6 +347,9 @@ class AlignmentPipeline:
             return [item for row in rows if (item := self._tech.normalize_feodo(row, source_id)) is not None]
         if source_id in ("tech.cyber.urlhaus",):
             return [item for row in rows if (item := self._tech.normalize_urlhaus(row, source_id)) is not None]
+        # Tech Events
+        if source_id == "tech.oss.tech_events":
+            return [item for row in rows if (item := self._tech.normalize_service_status(row, source_id)) is not None]  # Or specific normalizer if needed
         # NewsNow-based tech hotsearch
         if source_id in ("tech.oss.github_trending", "tech.oss.coolapk", "tech.oss.toutiao_tech"):
             if len(rows) == 1 and isinstance(rows[0], dict) and "items" in rows[0]:

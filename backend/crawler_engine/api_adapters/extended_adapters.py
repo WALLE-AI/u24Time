@@ -13,9 +13,28 @@ WorldMonitor 策略：按数据新鲜度分层 TTL，并发拉取，stale-while-
 - ReliefWebAdapter      (人道危机，1小时 TTL)
 - PolymarketAdapter     (预测市场，30分钟 TTL)
 - HackerNewsAdapter     (HN Top Stories，15分钟 TTL)
+- SemanticScholarAdapter (学术趋势论文，1小时 TTL)
 """
 
 from __future__ import annotations
+import asyncio
+import httpx
+from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from config import settings
+
+_RETRY = dict(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError)),
+)
+
+# Use a more realistic browser User-Agent to avoid TLS/Rate-limit issues
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 import asyncio
 from datetime import datetime, timezone
@@ -422,3 +441,37 @@ class HackerNewsAdapter:
 
         logger.info(f"HackerNewsAdapter: 获取 {len(results)} 篇 HN Top Story")
         return results
+
+
+# ══════════════════════════════════════════════════════════════
+# SemanticScholarAdapter — 1小时 TTL
+# ══════════════════════════════════════════════════════════════
+
+class SemanticScholarAdapter:
+    """
+    Semantic Scholar Graph API v1 Adapter（无需 Key，有限额使用）。
+    用于抓取趋势论文或特定领域的学术进展。
+
+    文档: https://api.semanticscholar.org/api-docs/graph
+    """
+
+    API_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+
+    @retry(**_RETRY)
+    async def fetch_trending(self, query: str = "AI", limit: int = 20) -> list[dict]:
+        """抓取最新的趋势论文"""
+        # Semantic Scholar API 有较严格的频率限制，增加小额延迟
+        await asyncio.sleep(2)
+        params = {
+            "query": query,
+            "limit": limit,
+            "fields": "title,abstract,url,year,citationCount,authors",
+            "sort": "citationCount:desc",  # 简单起见，按引用量排序代表趋势
+        }
+        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, headers=HEADERS) as client:
+            resp = await client.get(self.API_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            papers = data.get("data", [])
+            logger.info(f"SemanticScholarAdapter: 获取 {len(papers)} 篇论文 (query={query})")
+            return papers

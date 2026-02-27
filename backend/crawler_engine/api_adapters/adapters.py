@@ -412,18 +412,22 @@ class URLhausAdapter:
 
 # source_id → NewsNow API 中对应的源标识符
 NEWSNOW_SOURCE_MAP: dict[str, str] = {
-    "hotsearch.weibo":        "weibo",
-    "hotsearch.zhihu":        "zhihu",
-    "hotsearch.bilibili":     "bilibili-hot-search",
-    "hotsearch.toutiao":      "toutiao",
-    "hotsearch.douyin":       "douyin",
-    "hotsearch.github":       "github-trending-today",
-    "hotsearch.coolapk":      "coolapk",
-    "hotsearch.tieba":        "tieba",
-    "hotsearch.wallstreetcn": "wallstreetcn",
-    "hotsearch.thepaper":     "thepaper",
-    "hotsearch.cls":          "cls-hot",
-    "hotsearch.xueqiu":       "xueqiu",
+    "global.social.weibo_newsnow":        "weibo",
+    "global.social.zhihu_newsnow":        "zhihu",
+    "global.social.bilibili_newsnow":     "bilibili-hot-search",
+    "global.social.douyin_newsnow":       "douyin",
+    "global.social.tieba_newsnow":        "tieba",
+    "global.diplomacy.thepaper":          "thepaper",
+    "economy.stock.wallstreetcn":         "wallstreetcn",
+    "economy.stock.cls_hot":              "cls-hot",
+    "economy.stock.xueqiu":               "xueqiu",
+    "tech.oss.github_trending":           "github-trending-today",
+    "tech.oss.coolapk":                   "coolapk",
+    "tech.oss.toutiao_tech":              "toutiao",
+    # Legacy fallbacks
+    "hotsearch.github":                   "github-trending-today",
+    "hotsearch.coolapk":                  "coolapk",
+    "hotsearch.toutiao":                  "toutiao",
 }
 
 

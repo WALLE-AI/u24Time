@@ -39,22 +39,26 @@ from data_alignment.schema import (
 
 # NewsNow source_id → CanonicalItem metadata
 NEWSNOW_META: dict[str, dict] = {
-    "hotsearch.weibo":        {"platform": "weibo",       "category": "social",    "geo": "CN"},
-    "hotsearch.zhihu":        {"platform": "zhihu",       "category": "qa",        "geo": "CN"},
-    "hotsearch.bilibili":     {"platform": "bilibili",    "category": "video",     "geo": "CN"},
-    "hotsearch.toutiao":      {"platform": "toutiao",     "category": "news",      "geo": "CN"},
-    "hotsearch.douyin":       {"platform": "douyin",      "category": "video",     "geo": "CN"},
-    "hotsearch.github":       {"platform": "github",      "category": "tech",      "geo": None},
-    "hotsearch.coolapk":      {"platform": "coolapk",     "category": "android",   "geo": "CN"},
-    "hotsearch.tieba":        {"platform": "tieba",       "category": "forum",     "geo": "CN"},
-    "hotsearch.wallstreetcn": {"platform": "wallstreetcn","category": "finance",   "geo": "CN"},
-    "hotsearch.thepaper":     {"platform": "thepaper",    "category": "news",      "geo": "CN"},
-    "hotsearch.cls":          {"platform": "cls",         "category": "finance",   "geo": "CN"},
-    "hotsearch.xueqiu":       {"platform": "xueqiu",      "category": "finance",   "geo": "CN"},
+    "global.social.weibo_newsnow":    {"platform": "weibo",       "category": "social",    "geo": "CN"},
+    "global.social.zhihu_newsnow":    {"platform": "zhihu",       "category": "qa",        "geo": "CN"},
+    "global.social.bilibili_newsnow": {"platform": "bilibili",    "category": "video",     "geo": "CN"},
+    "global.social.douyin_newsnow":   {"platform": "douyin",      "category": "video",     "geo": "CN"},
+    "global.social.tieba_newsnow":    {"platform": "tieba",       "category": "forum",     "geo": "CN"},
+    "global.diplomacy.thepaper":      {"platform": "thepaper",    "category": "news",      "geo": "CN"},
+    "economy.stock.wallstreetcn":     {"platform": "wallstreetcn","category": "finance",   "geo": "CN"},
+    "economy.stock.cls_hot":          {"platform": "cls",         "category": "finance",   "geo": "CN"},
+    "economy.stock.xueqiu":           {"platform": "xueqiu",      "category": "finance",   "geo": "CN"},
+    "tech.oss.github_trending":       {"platform": "github",      "category": "tech",      "geo": None},
+    "tech.oss.coolapk":               {"platform": "coolapk",     "category": "android",   "geo": "CN"},
+    "tech.oss.toutiao_tech":          {"platform": "toutiao",     "category": "news",      "geo": "CN"},
+    # Legacy fallbacks (optional but good for robustness)
+    "hotsearch.github":               {"platform": "github",      "category": "tech",      "geo": None},
+    "hotsearch.coolapk":              {"platform": "coolapk",     "category": "android",   "geo": "CN"},
+    "hotsearch.toutiao":              {"platform": "toutiao",     "category": "news",      "geo": "CN"},
 }
 
 # 财经源使用金融严重度补充规则
-FINANCE_SOURCES = {"hotsearch.wallstreetcn", "hotsearch.cls", "hotsearch.xueqiu"}
+FINANCE_SOURCES = {"economy.stock.wallstreetcn", "economy.stock.cls_hot", "economy.stock.xueqiu"}
 
 
 class HotSearchNormalizer:

@@ -80,6 +80,9 @@ SOURCE_SCHEDULE: dict[str, int] = {
     "tech.oss.coolapk":                   NEWS_INTERVAL_MIN,
     "tech.oss.toutiao_tech":              NEWS_INTERVAL_MIN,
     "tech.oss.hackernews":                NEWS_INTERVAL_MIN,
+    "tech.oss.techcrunch":                NEWS_INTERVAL_MIN,
+    "tech.oss.tech_events":               NEWS_INTERVAL_MIN,
+    "tech.oss.trending_repos":            NEWS_INTERVAL_MIN,
 
     # ── 事件/威胁 (30分钟) ─────────────────────────────────────
     "global.disaster.usgs":               EVENT_INTERVAL_MIN,
@@ -97,6 +100,14 @@ SOURCE_SCHEDULE: dict[str, int] = {
     "economy.quant.fred_series":          MACRO_INTERVAL_MIN,
     "economy.quant.macro_signals":        MACRO_INTERVAL_MIN,
     "economy.quant.bis_policy_rates":     MACRO_INTERVAL_MIN,
+    "academic.arxiv.cs_ai":               MACRO_INTERVAL_MIN,
+    "academic.arxiv.cs_lg":               MACRO_INTERVAL_MIN,
+    "academic.arxiv.cs_cv":               MACRO_INTERVAL_MIN,
+    "academic.arxiv.cs_cl":               MACRO_INTERVAL_MIN,
+    "academic.arxiv.econ":                MACRO_INTERVAL_MIN,
+    "academic.arxiv.physics":             MACRO_INTERVAL_MIN,
+    "academic.arxiv.q_bio":               MACRO_INTERVAL_MIN,
+    "academic.arxiv.math_st":             MACRO_INTERVAL_MIN,
     "academic.huggingface.papers":        MACRO_INTERVAL_MIN,
     "academic.semantic_scholar.trending": MACRO_INTERVAL_MIN,
     "global.conflict.acled":              MACRO_INTERVAL_MIN,
@@ -174,6 +185,8 @@ class DataScheduler:
         self._register_jobs()
         self._scheduler.start()
         logger.info(f"DataScheduler: 已启动，注册 {len(SOURCE_SCHEDULE)} 个定时任务")
+        # 启动时立即触发一次全量刷新
+        self.trigger_all_now()
 
     def _register_jobs(self):
         """按 TTL 分层注册所有调度任务"""
@@ -205,11 +218,9 @@ class DataScheduler:
         """
         logger.debug(f"DataScheduler: 开始采集 {source_id}")
         try:
-            db_session = None
-            if self._db_factory:
-                db_session = self._db_factory()
-
-            items = await self._dispatch_crawl(source_id, db_session)
+            # 优化点：不再在调度层开启长期 DB 会话。改为让引擎/管道按需开启短连接。
+            # 这能有效防止因大量并行网络 I/O 长期占用 DB 连接池导致的任务挂起。
+            items = await self._dispatch_crawl(source_id, db_session=None)
 
             # 更新 stale_cache
             self._last_success[source_id] = datetime.now(timezone.utc)
@@ -237,6 +248,7 @@ class DataScheduler:
             YahooFinanceAdapter, FearGreedAdapter, BtcHashrateAdapter,
             HuggingFaceAdapter, CloudStatusAdapter, NVDAdapter,
             ReliefWebAdapter, PolymarketAdapter, HackerNewsAdapter,
+            SemanticScholarAdapter, TechEventsAdapter,
         )
         from data_alignment.pipeline import AlignmentPipeline
 
@@ -273,10 +285,20 @@ class DataScheduler:
             data = await adapter.fetch()
             return await pipeline.align_and_save(source_id, [data], db_session=db_session)
 
+        # ── arXiv RSS Papers ─────────────────────────────────
+        if source_id.startswith("academic.arxiv."):
+            return await self._engine.run_rss(feed_ids=[source_id], db_session=db_session)
+
         # ── HuggingFace Daily Papers ──────────────────────────
         if source_id == "academic.huggingface.papers":
             adapter = HuggingFaceAdapter()
             rows = await adapter.fetch()
+            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+
+        # ── Semantic Scholar Trending ────────────────────────
+        if source_id == "academic.semantic_scholar.trending":
+            adapter = SemanticScholarAdapter()
+            rows = await adapter.fetch_trending(query="AI")
             return await pipeline.align_and_save(source_id, rows, db_session=db_session)
 
         # ── NVD CVE ───────────────────────────────────────────
@@ -301,6 +323,12 @@ class DataScheduler:
         if source_id == "tech.oss.hackernews":
             adapter = HackerNewsAdapter()
             rows = await adapter.fetch_top_stories()
+            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+
+        # ── Tech Events ───────────────────────────────────────
+        if source_id == "tech.oss.tech_events":
+            adapter = TechEventsAdapter()
+            rows = await adapter.fetch_events()
             return await pipeline.align_and_save(source_id, rows, db_session=db_session)
 
         # ── 加密货币 (CoinGecko，复用 engine) ─────────────────

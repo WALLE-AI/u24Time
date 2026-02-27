@@ -8,14 +8,34 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from typing import Optional
+from typing import Optional, Any
+from dateutil import parser
 
 from data_alignment.schema import (
     CanonicalItem, SourceType, SeverityLevel, DomainType, SubDomainType,
 )
 
 
-def _now_ts() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+def _parse_dt(raw: Any) -> datetime:
+    """Robustly parse date string/timestamp to UTC datetime"""
+    if isinstance(raw, datetime):
+        return raw.astimezone(timezone.utc)
+    if isinstance(raw, (int, float)):
+        # Assume timestamp
+        return datetime.fromtimestamp(raw, tz=timezone.utc)
+    if isinstance(raw, str):
+        try:
+            return parser.parse(raw).astimezone(timezone.utc)
+        except Exception:
+            try:
+                # Fallback for simple formats
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+            except Exception:
+                pass
+    return _now_dt()
 
 
 def _make_id(*parts: str) -> str:
@@ -35,7 +55,7 @@ class AcademicNormalizer:
             title = entry.get("title", "").replace("\n", " ").strip()
             summary = (entry.get("summary") or "").replace("\n", " ").strip()[:500]
             link = entry.get("link", arxiv_id)
-            published = entry.get("published", _now_ts())
+            published = _parse_dt(entry.get("published", entry.get("updated", _now_dt())))
             authors_raw = entry.get("authors", [])
             if authors_raw and isinstance(authors_raw[0], dict):
                 authors = [a.get("name", "") for a in authors_raw[:5]]
@@ -58,10 +78,11 @@ class AcademicNormalizer:
                 url=link,
                 author=", ".join(authors),
                 published_at=published,
-                crawled_at=_now_ts(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_metadata={"arxiv_id": arxiv_id, "category": category, "authors": authors},
                 categories=["arxiv", "paper", category.lower()],
+                keywords=authors + [category],
             )
         except Exception:
             return None
@@ -72,11 +93,16 @@ class AcademicNormalizer:
     def normalize_huggingface_paper(self, paper: dict) -> Optional[CanonicalItem]:
         """HuggingFace /api/daily_papers item"""
         try:
-            paper_id = paper.get("id", "")
-            title = paper.get("paper", {}).get("title", paper.get("title", ""))
-            summary = (paper.get("paper", {}).get("summary") or paper.get("summary", ""))[:500]
-            published = paper.get("publishedAt", paper.get("paper", {}).get("publishedAt", _now_ts()))
+            # Check if it's the direct paper object or wrapped
+            paper_data = paper.get("paper", paper)
+            paper_id = paper_data.get("id", "")
+            title = paper_data.get("title", "")
+            summary = (paper_data.get("summary") or "")[:500]
+            published = _parse_dt(paper_data.get("publishedAt", _now_dt()))
             upvotes = paper.get("numComments", paper.get("upvotes", 0))
+
+            if not title:
+                return None
 
             # HF papers always AI-related → MEDIUM
             return CanonicalItem(
@@ -87,9 +113,9 @@ class AcademicNormalizer:
                 sub_domain=SubDomainType.PAPER,
                 title=title,
                 body=summary,
-                url=f"https://huggingface.co/papers/{paper_id}",
+                url=f"https://huggingface.co/papers/{paper_id}" if paper_id else None,
                 published_at=published,
-                crawled_at=_now_ts(),
+                crawled_at=_now_dt(),
                 severity_level=SeverityLevel.MEDIUM,
                 raw_engagement={"comments": upvotes},
                 raw_metadata={"hf_id": paper_id},
@@ -102,20 +128,22 @@ class AcademicNormalizer:
     # Semantic Scholar
     # ──────────────────────────────────────────────────────────────
     def normalize_semantic_scholar(self, paper: dict) -> Optional[CanonicalItem]:
-        """Semantic Scholar /graph/v1/paper response"""
+        """Semantic Scholar Paper dict"""
         try:
-            paper_id = paper.get("paperId", "")
+            # Check if wrapped in 'paper' or directly
+            paper_id = paper.get("paperId", paper.get("id", ""))
             title = paper.get("title", "")
             abstract = (paper.get("abstract") or "")[:500]
             citation_count = paper.get("citationCount", 0)
-            published = paper.get("year", "")
+            published = _parse_dt(paper.get("year", _now_dt()))
             authors = [a.get("name", "") for a in paper.get("authors", [])[:5]]
             url = paper.get("url", f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}")
 
-            severity = SeverityLevel.HIGH if citation_count >= 1000 else (SeverityLevel.MEDIUM if citation_count >= 100 else SeverityLevel.INFO)
+            if not title:
+                return None
 
             return CanonicalItem(
-                item_id=_make_id("s2", paper_id),
+                item_id=_make_id("ss_paper", paper_id, title[:20]),
                 source_id="academic.semantic_scholar.trending",
                 source_type=SourceType.NEWS,
                 domain=DomainType.ACADEMIC,
@@ -124,12 +152,12 @@ class AcademicNormalizer:
                 body=abstract,
                 url=url,
                 author=", ".join(authors),
-                published_at=str(published),
-                crawled_at=_now_ts(),
-                severity_level=severity,
+                published_at=published,
+                crawled_at=_now_dt(),
+                severity_level=SeverityLevel.INFO,
                 raw_engagement={"citations": citation_count},
-                raw_metadata={"s2_id": paper_id, "citation_count": citation_count},
-                categories=["semantic-scholar", "paper", "citation"],
+                raw_metadata={"ss_id": paper_id},
+                categories=["semanticscholar", "paper"],
             )
         except Exception:
             return None
@@ -160,8 +188,8 @@ class AcademicNormalizer:
                 sub_domain=SubDomainType.CONF,
                 title=title,
                 url=url,
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=SeverityLevel.INFO,
                 raw_metadata={"event": event},
                 categories=["conference", "event"] + (tags if isinstance(tags, list) else []),
@@ -192,8 +220,8 @@ class AcademicNormalizer:
                 sub_domain=SubDomainType.PREDICTION,
                 title=f"[预测市场] {title} — YES {yes_price:.0%}",
                 url=url,
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_engagement={"volume": int(volume)},
                 raw_metadata={"market_id": market_id, "yes_price": yes_price, "volume": volume},

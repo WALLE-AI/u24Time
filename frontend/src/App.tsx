@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Shield, Globe, Activity, Cpu, Terminal, TrendingUp,
   BarChart2, Radio, Wifi, WifiOff, RefreshCw, Zap,
-  Maximize2, Minimize2, AlertTriangle, ChevronRight, Sparkles, BookOpen, DollarSign, X
+  AlertTriangle, ChevronRight, Sparkles, BookOpen, DollarSign, X
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // ─────────────────────────────────────  Types
 interface LogEntry {
@@ -22,9 +24,9 @@ interface StatItem {
 }
 const DOMAIN_TABS = [
   { id: 'all', label: '全览', icon: Globe },
-  { id: 'geo', label: '地缘', icon: Shield },
-  { id: 'econ', label: '经济', icon: DollarSign },
-  { id: 'tech', label: '科技', icon: Cpu },
+  { id: 'global', label: '全球监控', icon: Shield },
+  { id: 'economy', label: '经济', icon: DollarSign },
+  { id: 'technology', label: '技术', icon: Cpu },
   { id: 'academic', label: '学术', icon: BookOpen },
 ];
 
@@ -46,7 +48,7 @@ function domainColor(d: string) {
   const map: Record<string, string> = {
     'global': '#ff5c00', 'economy': '#3357FF', 'technology': '#33FF57', 'academic': '#c084fc'
   };
-  return map[d] ?? '#888';
+  return map[d] ?? '#6b7280';
 }
 
 function levelColor(l: string) {
@@ -92,14 +94,30 @@ function StatBar({ stats }: { stats: StatItem[] }) {
   );
 }
 
-function HotPanelItems({ items, activeTab }: { items: any[], activeTab: string }) {
-  const filtered = activeTab === 'all' ? items : items.filter(i => {
-    return i.raw_domain === activeTab;
-  });
+function HotPanelItems({ items }: { items: any[] }) {
+  const filtered = items;
   return (
     <div>
       {filtered.map(item => (
-        <div key={item.rank} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid #1a1a1a' }}>
+        <a
+          key={item.rank}
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '9px 0',
+            borderBottom: '1px solid #1a1a1a',
+            textDecoration: 'none',
+            color: 'inherit',
+            cursor: item.url ? 'pointer' : 'default',
+            transition: 'background 0.2s'
+          }}
+          onMouseEnter={(e) => { if (item.url) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
           <span style={{ width: 22, textAlign: 'center', fontWeight: 900, fontSize: 13, color: item.rank <= 3 ? '#ff5c00' : '#555' }}>
             {item.rank}
           </span>
@@ -107,7 +125,7 @@ function HotPanelItems({ items, activeTab }: { items: any[], activeTab: string }
           <span style={{ fontSize: 11, color: domainColor(item.raw_domain), fontWeight: 700, minWidth: 32 }}>{item.domain}</span>
           <HeatBar value={item.heat} />
           <span style={{ fontSize: 11, color: '#666', minWidth: 28, textAlign: 'right' }}>{item.heat}</span>
-        </div>
+        </a>
       ))}
       {filtered.length === 0 && <div style={{ padding: '20px 0', color: '#555', textAlign: 'center' }}>暂无数据</div>}
     </div>
@@ -215,15 +233,19 @@ function AISummaryPanel({ summary, loading, onRefresh }: { summary: string, load
 
       <div style={{
         fontSize: 13, color: '#c9d1d9', lineHeight: 1.6, minHeight: '60px',
-        fontFamily: 'var(--font-main)', whiteSpace: 'pre-wrap'
-      }}>
+        fontFamily: 'var(--font-main)',
+      }} className="markdown-content">
         {loading ? (
           <div style={{ display: 'flex', gap: 4, alignItems: 'center', color: '#555' }}>
             <div className="pulse-dot" style={{ width: 4, height: 4, background: '#ff5c00', borderRadius: '50%' }} />
             <span>正在深度分析全网实时动态...</span>
           </div>
         ) : (
-          displayText || '点击“重新生成”以获取最新情报动态分析。'
+          displayText ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {displayText}
+            </ReactMarkdown>
+          ) : '点击“重新生成”以获取最新情报动态分析。'
         )}
       </div>
 
@@ -323,10 +345,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('all');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connected, setConnected] = useState(false);
-  const [consoleExpanded, setConsoleExpanded] = useState(false);
   const [aiSummary, setAiSummary] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [totalItems, setTotalItems] = useState(0);
+  const [sidebarTab, setSidebarTab] = useState<'feed' | 'sources'>('feed');
 
   // Real dynamic states
   const [hotItems, setHotItems] = useState<any[]>([]);
@@ -340,7 +362,7 @@ export default function App() {
   }, []);
 
   // Fetch Dashboard Data
-  const fetchData = async () => {
+  const fetchData = async (domain?: string) => {
     try {
       const respDomains = await fetch(`${API_BASE}/api/v1/domains`);
       const dataDomains = await respDomains.json();
@@ -360,27 +382,47 @@ export default function App() {
         setSources(dataSources.data);
       }
 
-      const respItems = await fetch(`${API_BASE}/api/v1/items?limit=10`);
+      const url = new URL(`${API_BASE}/api/v1/items`);
+      url.searchParams.append('limit', '20');
+      if (domain && domain !== 'all') {
+        url.searchParams.append('domain', domain);
+      }
+
+      const respItems = await fetch(url.toString());
       const dataItems = await respItems.json();
       if (dataItems.success) {
         setTotalItems(dataItems.total || 0);
-        setHotItems(dataItems.data.map((item: any, idx: number) => ({
-          rank: idx + 1,
-          title: item.title,
-          domain: item.domain === 'global' ? '全球' : (item.domain === 'economy' ? '经济' : (item.domain === 'technology' ? '技术' : '学术')),
-          raw_domain: item.domain,
-          heat: item.hotness_score || 0
-        })));
+        setHotItems(dataItems.data.map((item: any, idx: number) => {
+          const domainLabelMap: Record<string, string> = {
+            'global': '全球',
+            'economy': '经济',
+            'technology': '技术',
+            'academic': '学术'
+          };
+          return {
+            rank: idx + 1,
+            title: item.title,
+            url: item.url,
+            domain: domainLabelMap[item.domain] || '综合',
+            raw_domain: item.domain,
+            heat: item.hotness_score || 0
+          };
+        }));
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     }
   };
 
-  const fetchSummary = async () => {
+  const fetchSummary = async (domain?: string) => {
     setIsSummarizing(true);
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/ai/summary`, {
+      const url = new URL(`${API_BASE}/api/v1/ai/summary`);
+      if (domain && domain !== 'all') {
+        url.searchParams.append('domain', domain);
+      }
+
+      const resp = await fetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -421,9 +463,9 @@ export default function App() {
           msg: `收到系统事件: ${data.event} ${data.total_items ? `(总数: ${data.total_items})` : ''}`
         });
 
-        // Refresh data when crawl completes
-        if (data.event.includes('complete')) {
-          fetchData();
+        // Refresh data when crawl completes or scheduler finishes
+        if (data.event.includes('complete') || data.event.includes('done')) {
+          fetchData(activeTab);
         }
       } catch (err) {
         console.error('Failed to parse SSE message:', err);
@@ -442,9 +484,9 @@ export default function App() {
   }, [addLog]);
 
   useEffect(() => {
-    fetchData();
-    fetchSummary();
-  }, []);
+    fetchData(activeTab);
+    fetchSummary(activeTab);
+  }, [activeTab]);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#080808', color: '#e0e0e0', fontFamily: 'Inter,sans-serif' }}>
@@ -484,17 +526,20 @@ export default function App() {
               ? <><Wifi size={13} style={{ color: '#34d399' }} /><span style={{ color: '#34d399' }}>已连接</span></>
               : <><WifiOff size={13} style={{ color: '#f87171' }} /><span style={{ color: '#f87171' }}>重连中</span></>}
           </span>
-          <button style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', border: '1.5px solid #333', background: 'none', color: '#ccc', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+          <button
+            onClick={() => { fetchData(activeTab); fetchSummary(activeTab); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', border: '1.5px solid #333', background: 'none', color: '#ccc', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}
+          >
             <RefreshCw size={12} /> 刷新
           </button>
         </div>
       </header>
 
       {/* ── Body: main + console ── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', gap: 0 }}>
+      <div style={{ flex: 1, display: 'flex', gap: 0 }}>
 
         {/* ── Main content ── */}
-        <main style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <main style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
           <AISummaryPanel
             summary={aiSummary}
@@ -504,22 +549,16 @@ export default function App() {
 
           <StatBar stats={domainStats.length > 0 ? domainStats : DOMAIN_STATS_FALLBACK} />
 
-          {/* Two-column grid: Hot + Sources */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 14 }}>
-
-            <PanelBox title="热搜排行" icon={<TrendingUp size={14} />} badge="每5分钟更新" count={hotItems.length}
-              style={{ minHeight: 380 }}>
-              <HotPanelItems items={hotItems.length > 0 ? hotItems : []} activeTab={activeTab} />
-            </PanelBox>
-
-            <PanelBox title="数据源状态" icon={<Radio size={14} />} badge="实时" badgeColor="#34d399">
-              <SourcePanelSources sources={sources.length > 0 ? sources : []} />
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)', fontSize: 11, color: '#666', lineHeight: 1.7 }}>
-                <div>总条目 <strong style={{ color: '#fff' }}>{totalItems}</strong></div>
-                <div>规范化成功率 <strong style={{ color: '#10b981' }}>97.4%</strong></div>
-                <div>活跃任务数 <strong style={{ color: '#d97706' }}>{sources.filter(s => s.status === 'live').length}</strong></div>
-                <div>上次同步 <strong style={{ color: '#fff' }}>刚刚</strong></div>
-              </div>
+          {/* Main content grid - Now single column for focus */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <PanelBox
+              title="热搜排行"
+              icon={<TrendingUp size={14} />}
+              badge="每5分钟更新"
+              count={hotItems.length}
+              style={{ minHeight: 480 }}
+            >
+              <HotPanelItems items={hotItems.length > 0 ? hotItems : []} />
             </PanelBox>
           </div>
 
@@ -552,23 +591,57 @@ export default function App() {
 
         {/* ── Console right panel ── */}
         <aside style={{
-          width: consoleExpanded ? 520 : 380,
+          width: 420,
           borderLeft: '2px solid #1a1a1a',
           display: 'flex',
           flexDirection: 'column',
-          transition: 'width 0.2s ease',
           flexShrink: 0
         }}>
-          {/* Console expand toggle */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 8px', background: '#0a0a0a', borderBottom: '1px solid #1a1a1a' }}>
-            <button onClick={() => setConsoleExpanded(e => !e)}
-              style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', padding: 3 }}
-              title={consoleExpanded ? '收起' : '展开'}>
-              {consoleExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          {/* Sidebar Tabs */}
+          <div style={{ display: 'flex', background: '#0a0a0a', borderBottom: '1px solid #222' }}>
+            <button
+              onClick={() => setSidebarTab('feed')}
+              style={{
+                flex: 1, padding: '12px', background: sidebarTab === 'feed' ? '#111' : 'transparent',
+                color: sidebarTab === 'feed' ? '#ff5c00' : '#666', border: 'none', cursor: 'pointer',
+                fontSize: 12, fontWeight: 800, borderBottom: sidebarTab === 'feed' ? '2px solid #ff5c00' : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+              }}
+            >
+              <Terminal size={14} /> 实时情报
+            </button>
+            <button
+              onClick={() => setSidebarTab('sources')}
+              style={{
+                flex: 1, padding: '12px', background: sidebarTab === 'sources' ? '#111' : 'transparent',
+                color: sidebarTab === 'sources' ? '#ff5c00' : '#666', border: 'none', cursor: 'pointer',
+                fontSize: 12, fontWeight: 800, borderBottom: sidebarTab === 'sources' ? '2px solid #ff5c00' : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+              }}
+            >
+              <Radio size={14} /> 数据源
             </button>
           </div>
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <ConsolePanel logs={logs} onClear={() => setLogs([])} />
+
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {sidebarTab === 'feed' ? (
+              <ConsolePanel logs={logs} onClear={() => setLogs([])} />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div style={{ flex: 1, overflow: 'auto', padding: '14px' }}>
+                  <SourcePanelSources sources={sources} />
+                </div>
+                {/* Fixed Stats Footer in Sidebar */}
+                <div style={{ padding: '14px', background: '#0f0f0f', borderTop: '2px solid #222', fontSize: 11, color: '#666' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>总条目 <strong style={{ color: '#fff' }}>{totalItems}</strong></div>
+                    <div>规范化 <strong style={{ color: '#10b981' }}>97.4%</strong></div>
+                    <div>活跃任务 <strong style={{ color: '#d97706' }}>{sources.filter(s => s.status === 'live').length}</strong></div>
+                    <div>上次同步 <strong style={{ color: '#fff' }}>刚刚</strong></div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </aside>
       </div>

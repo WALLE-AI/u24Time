@@ -77,7 +77,10 @@ ALL_SOURCES: list[DataSourceConfig] = [
 
     # ── crypto ────────────────────────────────────────────────────
     _s("economy.crypto.coingecko", "CoinGecko 加密货币", "market", "CoinGecko BTC/ETH/SOL 等主流加密货币价格", "api", "economy", "crypto", health="https://api.coingecko.com/api/v3/ping", tags=["crypto","coingecko"]),
-    _s("economy.crypto.stablecoin_markets", "稳定币市场 (CoinGecko)", "market", "CoinGecko USDT/USDC 稳定币市值", "api", "economy", "crypto", health="https://api.coingecko.com/api/v3/ping", tags=["crypto","stablecoin"]),
+    _s("economy.crypto.stablecoin_markets", "稳定币 market (CoinGecko)", "market", "CoinGecko USDT/USDC 稳定币市值", "api", "economy", "crypto", health="https://api.coingecko.com/api/v3/ping", tags=["crypto","stablecoin"]),
+    _s("economy.finance.marketwatch", "MarketWatch", "news", "MarketWatch Financial News RSS", "rss", "economy", "finance", health="https://www.marketwatch.com/rss/topstories", tags=["marketwatch","finance","news"]),
+    _s("economy.finance.cnbc", "CNBC 财经", "news", "CNBC Business News RSS", "rss", "economy", "finance", health="https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", tags=["cnbc","finance","news"]),
+    _s("economy.finance.ft", "FT 金融时报", "news", "Financial Times World News RSS", "rss", "economy", "finance", health="https://www.ft.com/?format=rss", tags=["ft","finance","news"]),
 
     # ── trade ─────────────────────────────────────────────────────
     _s("economy.trade.wto_flows", "WTO 贸易流数据", "market", "WTO API api.wto.org 进出口额双边贸易", "api", "economy", "trade", health="https://api.wto.org", tags=["wto","trade","export"]),
@@ -180,6 +183,8 @@ ALL_SOURCES: list[DataSourceConfig] = [
     _s("global.diplomacy.scmp", "SCMP 南华早报", "news", "South China Morning Post Asia RSS", "rss", "global", "diplomacy", health="https://www.scmp.com/rss/91/feed", tags=["scmp","asia","china"]),
     _s("global.diplomacy.bellingcat", "Bellingcat OSINT", "news", "Bellingcat 开源情报调查", "rss", "global", "diplomacy", health="https://www.bellingcat.com/feed/", tags=["bellingcat","osint","investigation"]),
     _s("global.diplomacy.kyiv_independent", "基辅独立报", "news", "Kyiv Independent 乌克兰冲突报道", "rss", "global", "diplomacy", health="https://kyivindependent.com/feed/", tags=["ukraine","conflict","russia"]),
+    _s("global.diplomacy.nyt_world", "NYT 世界新闻", "news", "New York Times World RSS", "rss", "global", "diplomacy", health="https://rss.nytimes.com/services/xml/rss/nyt/World.xml", tags=["nyt","english","news"]),
+    _s("global.diplomacy.ap_world", "AP 国际动态", "news", "Associated Press International RSS", "rss", "global", "diplomacy", health="https://rsshub.app/ap/headlines/apf-intlnews", tags=["ap","english","news"]),
     _s("global.diplomacy.thepaper", "澎湃新闻 (NewsNow)", "hotsearch", "澎湃新闻国内事件热榜", "api", "global", "diplomacy", health="https://newsnow.busiyi.world/api/s?id=thepaper&latest", tags=["china","news","thepaper"]),
     _s("global.diplomacy.risk_scores", "国家风险评分 (WM)", "geo", "worldmonitor get-risk-scores OSINT国家风险模型", "api", "global", "diplomacy", tags=["risk","country","intelligence"]),
     _s("global.diplomacy.country_intel", "国家情报简报 (WM)", "geo", "worldmonitor get-country-intel-brief (GDELT+ACLED综合)", "api", "global", "diplomacy", tags=["intel","country","gdelt"]),

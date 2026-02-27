@@ -126,7 +126,7 @@ class CrawlerEngine:
             task.items_fetched = sum(len(entries) for _, entries in results)
 
             for feed, entries in results:
-                source_id = f"news.rss.{feed.feed_id}"
+                source_id = feed.feed_id
                 items = await self._pipeline.align_and_save(
                     source_id=source_id,
                     raw_data=entries,

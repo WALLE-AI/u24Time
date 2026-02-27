@@ -20,88 +20,61 @@ class RSSFeed:
 # 地缘政治 & 综合新闻
 # ─────────────────────────────────────────────────────────────
 GEOPOLITICAL_FEEDS: list[RSSFeed] = [
-    RSSFeed("bbc_world",     "https://feeds.bbci.co.uk/news/world/rss.xml",                    "BBC World",          "geopolitical"),
-    RSSFeed("reuters",        "https://feeds.reuters.com/reuters/worldNews",                     "Reuters World",      "geopolitical"),
-    RSSFeed("aljazeera",      "https://www.aljazeera.com/xml/rss/all.xml",                       "Al Jazeera",         "geopolitical"),
-    RSSFeed("guardian",       "https://www.theguardian.com/world/rss",                           "The Guardian",       "geopolitical"),
-    RSSFeed("nyt_world",      "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",          "NYT World",          "geopolitical"),
-    RSSFeed("ap_world",       "https://rsshub.app/ap/headlines/apf-intlnews",                    "AP World",           "geopolitical"),
-    RSSFeed("france24",       "https://www.france24.com/en/rss",                                 "France24 EN",        "geopolitical"),
-    RSSFeed("dw",             "https://rss.dw.com/rdf/rss-en-all",                               "Deutsche Welle",     "geopolitical"),
-    RSSFeed("euronews",       "https://www.euronews.com/rss",                                    "Euronews",           "geopolitical"),
-    RSSFeed("un_news",        "https://news.un.org/feed/subscribe/en/news/all/rss.xml",           "UN News",            "geopolitical"),
-    RSSFeed("cfr",            "https://www.cfr.org/rss.xml",                                     "CFR",                "geopolitical"),
-    RSSFeed("foreignpolicy",  "https://foreignpolicy.com/rss/",                                  "Foreign Policy",     "geopolitical"),
-    RSSFeed("thediplomat",    "https://thediplomat.com/feed/",                                   "The Diplomat",       "geopolitical"),
-    RSSFeed("nikkei_asia",    "https://asia.nikkei.com/rss/feed/nar",                            "Nikkei Asia",        "geopolitical"),
-    RSSFeed("scmp",           "https://www.scmp.com/rss/91/feed",                                "SCMP World",         "geopolitical"),
-    RSSFeed("kyiv_independent","https://kyivindependent.com/feed/",                              "Kyiv Independent",   "geopolitical"),
-    RSSFeed("moscow_times",   "https://www.themoscowtimes.com/rss/news",                         "Moscow Times",        "geopolitical"),
-    RSSFeed("cnn_world",      "https://rss.cnn.com/rss/edition_world.rss",                       "CNN World",          "geopolitical"),
-    RSSFeed("whitehouse",     "https://www.whitehouse.gov/feed/",                                "White House",        "geopolitical"),
-    RSSFeed("state_dept",     "https://www.state.gov/rss-feeds/press-releases/",                 "US State Dept",      "geopolitical"),
-    RSSFeed("csis",           "https://www.csis.org/rss.xml",                                    "CSIS",               "geopolitical"),
-    RSSFeed("brookings",      "https://www.brookings.edu/feed/",                                 "Brookings",          "geopolitical"),
-    RSSFeed("atlanticcouncil","https://www.atlanticcouncil.org/feed/",                           "Atlantic Council",   "geopolitical"),
-    RSSFeed("wsj_world",      "https://feeds.a.dj.com/rss/RSSWorldNews.xml",                    "WSJ World",          "geopolitical"),
-    RSSFeed("bellingcat",     "https://www.bellingcat.com/feed/",                                "Bellingcat",         "geopolitical"),
+    RSSFeed("global.diplomacy.bbc_world",     "https://feeds.bbci.co.uk/news/world/rss.xml",                    "BBC World",          "geopolitical"),
+    RSSFeed("global.diplomacy.reuters",        "https://feeds.reuters.com/reuters/worldNews",                     "Reuters World",      "geopolitical"),
+    RSSFeed("global.diplomacy.aljazeera",      "https://www.aljazeera.com/xml/rss/all.xml",                       "Al Jazeera",         "geopolitical"),
+    RSSFeed("global.diplomacy.guardian",       "https://www.theguardian.com/world/rss",                           "The Guardian",       "geopolitical"),
+    RSSFeed("global.diplomacy.nyt_world",      "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",          "NYT World",          "geopolitical"),
+    RSSFeed("global.diplomacy.ap_world",       "https://rsshub.app/ap/headlines/apf-intlnews",                    "AP World",           "geopolitical"),
+    RSSFeed("global.diplomacy.scmp",           "https://www.scmp.com/rss/91/feed",                                "SCMP World",         "geopolitical"),
+    RSSFeed("global.diplomacy.kyiv_independent","https://kyivindependent.com/feed/",                              "Kyiv Independent",   "geopolitical"),
+    RSSFeed("global.diplomacy.bellingcat",     "https://www.bellingcat.com/feed/",                                "Bellingcat",         "geopolitical"),
 ]
 
 # ─────────────────────────────────────────────────────────────
 # 军事 & 防务
 # ─────────────────────────────────────────────────────────────
 MILITARY_FEEDS: list[RSSFeed] = [
-    RSSFeed("defenseone",    "https://www.defenseone.com/rss/all/",                              "Defense One",        "military"),
-    RSSFeed("usni",          "https://news.usni.org/feed",                                       "USNI News",          "military"),
-    RSSFeed("defense_news",  "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml","Defense News",       "military"),
-    RSSFeed("military_times","https://www.militarytimes.com/arc/outboundfeeds/rss/",             "Military Times",     "military"),
-    RSSFeed("thedrive",      "https://www.thedrive.com/rss",                                     "The Drive",          "military"),
-    RSSFeed("taskpurpose",   "https://taskandpurpose.com/feed/",                                 "Task & Purpose",     "military"),
-    RSSFeed("breakingdefense","https://breakingdefense.com/feed/",                               "Breaking Defense",   "military"),
-    RSSFeed("oryx",          "https://www.oryxspioenkop.com/feeds/posts/default",                "Oryx",               "military"),
-    RSSFeed("rusi",          "https://rusi.org/rss",                                             "RUSI",               "military"),
-    RSSFeed("warontherocks", "https://warontherocks.com/feed/",                                  "War on the Rocks",   "military"),
-    RSSFeed("pentagon",      "https://www.defense.gov/Portals/1/RSS/news.xml",                   "US DoD",             "military"),
+    RSSFeed("global.military.defenseone",    "https://www.defenseone.com/rss/all/",                              "Defense One",        "military"),
+    RSSFeed("global.military.usni_news",     "https://news.usni.org/feed",                                       "USNI News",          "military"),
 ]
 
 # ─────────────────────────────────────────────────────────────
 # 科技 & AI
 # ─────────────────────────────────────────────────────────────
 TECH_FEEDS: list[RSSFeed] = [
-    RSSFeed("techcrunch",    "https://techcrunch.com/feed/",                                     "TechCrunch",         "tech"),
-    RSSFeed("theverge",      "https://www.theverge.com/rss/index.xml",                           "The Verge",          "tech"),
-    RSSFeed("arstechnica",   "https://feeds.arstechnica.com/arstechnica/index",                  "Ars Technica",       "tech"),
-    RSSFeed("wired",         "https://www.wired.com/feed/rss",                                   "Wired",              "tech"),
-    RSSFeed("hacker_news",   "https://hnrss.org/frontpage",                                      "Hacker News",        "tech"),
-    RSSFeed("arxiv_cs_ai",   "https://rss.arxiv.org/rss/cs.AI",                                  "ArXiv CS.AI",        "research"),
-    RSSFeed("arxiv_cs_lg",   "https://rss.arxiv.org/rss/cs.LG",                                  "ArXiv ML",           "research"),
-    RSSFeed("huggingface",   "https://huggingface.co/blog/feed.xml",                             "HuggingFace Blog",   "tech"),
-    RSSFeed("openai_blog",   "https://openai.com/blog/rss/",                                     "OpenAI Blog",        "tech"),
-    RSSFeed("mittech",       "https://www.technologyreview.com/feed/",                           "MIT Tech Review",    "tech"),
-    RSSFeed("zdnet",         "https://www.zdnet.com/news/rss.xml",                               "ZDNet",              "tech"),
-    RSSFeed("darkreading",   "https://www.darkreading.com/rss.xml",                              "Dark Reading",       "tech"),
-    RSSFeed("schneier",      "https://www.schneier.com/blog/atom.xml",                           "Schneier on Security","tech"),
-    RSSFeed("krebsonsecurity","https://krebsonsecurity.com/feed/",                               "Krebs on Security",  "tech"),
-    RSSFeed("venturebeat",   "https://venturebeat.com/feed/",                                    "VentureBeat",        "tech"),
-    RSSFeed("infoq",         "https://feed.infoq.com/",                                          "InfoQ",              "tech"),
-    RSSFeed("thenewstack",   "https://thenewstack.io/feed/",                                     "The New Stack",      "tech"),
-    RSSFeed("axios_tech",    "https://www.axios.com/feeds/feed.rss",                             "Axios",              "tech"),
-    RSSFeed("github_blog",   "https://github.blog/feed/",                                        "GitHub Blog",        "tech"),
+    RSSFeed("tech.oss.techcrunch",    "https://techcrunch.com/feed/",                                     "TechCrunch",         "tech"),
+    RSSFeed("academic.arxiv.cs_ai",   "https://rss.arxiv.org/rss/cs.AI",                                  "ArXiv CS.AI",        "research"),
+    RSSFeed("academic.arxiv.cs_lg",   "https://rss.arxiv.org/rss/cs.LG",                                  "ArXiv ML",           "research"),
 ]
 
 # ─────────────────────────────────────────────────────────────
 # 金融 & 经济
 # ─────────────────────────────────────────────────────────────
 FINANCE_FEEDS: list[RSSFeed] = [
-    RSSFeed("marketwatch",   "https://feeds.marketwatch.com/marketwatch/topstories/",             "MarketWatch",        "finance"),
-    RSSFeed("cnbc",          "https://www.cnbc.com/id/100003114/device/rss/rss.html",             "CNBC Business",      "finance"),
-    RSSFeed("ft",            "https://www.ft.com/?format=rss",                                   "Financial Times",    "finance"),
+    RSSFeed("economy.finance.marketwatch", "https://www.marketwatch.com/rss/topstories",                 "MarketWatch",        "finance"),
+    RSSFeed("economy.finance.cnbc",        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "CNBC Business", "finance"),
+    RSSFeed("economy.finance.ft",          "https://www.ft.com/?format=rss",                             "Financial Times",    "finance"),
     RSSFeed("economist",     "https://www.economist.com/finance-and-economics/rss.xml",           "Economist Finance",  "finance"),
     RSSFeed("worldbank",     "https://blogs.worldbank.org/feed",                                  "World Bank",         "finance"),
     RSSFeed("imf",           "https://www.imf.org/en/News/RSS",                                  "IMF News",           "finance"),
     RSSFeed("coindesk",      "https://www.coindesk.com/arc/outboundfeeds/rss/",                  "CoinDesk",           "finance"),
     RSSFeed("cointelegraph", "https://cointelegraph.com/rss",                                    "CoinTelegraph",      "finance"),
     RSSFeed("seeking_alpha", "https://seekingalpha.com/feed.xml",                                "Seeking Alpha",      "finance"),
+]
+
+# ─────────────────────────────────────────────────────────────
+# 地区性媒体
+# ─────────────────────────────────────────────────────────────
+ACADEMIC_FEEDS: list[RSSFeed] = [
+    RSSFeed("academic.arxiv.cs_ai",   "https://rss.arxiv.org/rss/cs.AI",                                  "ArXiv CS.AI",        "academic"),
+    RSSFeed("academic.arxiv.cs_lg",   "https://rss.arxiv.org/rss/cs.LG",                                  "ArXiv ML",           "academic"),
+    RSSFeed("academic.arxiv.cs_cv",   "https://rss.arxiv.org/rss/cs.CV",                                  "ArXiv Computer Vision","academic"),
+    RSSFeed("academic.arxiv.cs_cl",   "https://rss.arxiv.org/rss/cs.CL",                                  "ArXiv NLP",          "academic"),
+    RSSFeed("academic.arxiv.econ",    "https://rss.arxiv.org/rss/econ.GN",                                "ArXiv Economics",    "academic"),
+    RSSFeed("academic.arxiv.physics", "https://rss.arxiv.org/rss/physics",                                "ArXiv Physics",      "academic"),
+    RSSFeed("academic.arxiv.q_bio",   "https://rss.arxiv.org/rss/q-bio",                                  "ArXiv Quant-Bio",    "academic"),
+    RSSFeed("academic.arxiv.math_st", "https://rss.arxiv.org/rss/math.ST",                                "ArXiv Math Stats",   "academic"),
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -126,6 +99,7 @@ ALL_RSS_FEEDS: list[RSSFeed] = (
     + MILITARY_FEEDS
     + TECH_FEEDS
     + FINANCE_FEEDS
+    + ACADEMIC_FEEDS
     + REGIONAL_FEEDS
 )
 

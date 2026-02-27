@@ -22,8 +22,8 @@ body {
   background-color: var(--bg);
   color: var(--fg);
   font-family: var(--font-main);
-  overflow: hidden;
-  /* Main app uses internal scrolling */
+  overflow-y: auto;
+  min-height: 100vh;
 }
 
 /* ───────────────────────────────────── Scrollbars */
@@ -118,4 +118,69 @@ h4 {
 ::selection {
   background: var(--accent);
   color: #fff;
+}
+
+/* ───────────────────────────────────── Markdown Content */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  color: var(--accent);
+}
+
+.markdown-content h1 {
+  font-size: 1.4em;
+  border-bottom: 1px solid #333;
+  padding-bottom: 4px;
+}
+
+.markdown-content h2 {
+  font-size: 1.2em;
+}
+
+.markdown-content h3 {
+  font-size: 1.1em;
+}
+
+.markdown-content p {
+  margin-bottom: 12px;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin-bottom: 12px;
+  padding-left: 20px;
+}
+
+.markdown-content li {
+  margin-bottom: 4px;
+}
+
+.markdown-content b,
+.markdown-content strong {
+  color: #fff;
+  font-weight: 700;
+}
+
+.markdown-content code {
+  background: #1a1a1a;
+  padding: 2px 4px;
+  font-family: monospace;
+  font-size: 0.9em;
+  color: #34d399;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid #333;
+  margin: 16px 0;
+}
+
+.markdown-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+  color: #888;
+  font-style: italic;
+  margin: 12px 0;
 }

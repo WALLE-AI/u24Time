@@ -30,38 +30,63 @@ class LLMClient:
         self.model = model or settings.LLM_MODEL_NAME
         self.timeout = 30.0
 
-    async def generate_summary(self, domain_groups: dict[str, list[dict]]) -> str:
+    async def generate_summary(self, domain_groups: dict[str, list[dict]], target_domain: Optional[str] = None) -> str:
         """
         根据各领域的情报条目生成分领域的综述。
+        如果指定了 target_domain，则生成该领域的深度综述。
         """
         if not self.api_key:
             logger.warning("LLMClient: LLM_API_KEY 未配置，返回模拟摘要")
-            return self._mock_domain_summary(domain_groups)
+            return self._mock_domain_summary(domain_groups, target_domain)
 
-        # 构建分领域的上下文
+        # 构建上下文文字
         context_parts = []
+        domain_names = {
+            "economy": "经济",
+            "technology": "技术",
+            "academic": "学术",
+            "global": "全球监控"
+        }
+
         for domain, items in domain_groups.items():
             if not items:
                 continue
-            group_text = f"【{domain} 领域】:\n" + "\n".join([
-                f"- {item.get('title')}" for item in items[:10]
+            name = domain_names.get(domain, domain)
+            group_text = f"【{name} 领域】:\n" + "\n".join([
+                f"- {item.get('title')}: {item.get('body', '')[:100]}..." if item.get('body') else f"- {item.get('title')}"
+                for item in items[:15]
             ])
             context_parts.append(group_text)
         
         context = "\n\n".join(context_parts)
 
-        prompt = (
-            "你是一个资深全球情报分析师。请针对以下各领域的最新动态，提供一份综合简报。\n"
-            "要求：\n"
-            "1. 按领域（经济、技术、学术、全球监控）进行综述。\n"
-            "2. 每个领域的总结要精炼，突出最重要的高热度或高严重度事件。\n"
-            "3. 如果某个领域内容较少，可合并或简略描述。\n"
-            "4. 总字数控制在 250 字以内，使用专业、冷静的语气。\n"
-            "5. 必须使用中文，采用清晰的分段格式。\n\n"
-            "情报内容：\n"
-            f"{context}\n\n"
-            "综述："
-        )
+        if target_domain and target_domain != "all":
+            domain_cn = domain_names.get(target_domain, target_domain)
+            prompt = (
+                f"你是一个资深情报分析专家。请针对选定的【{domain_cn}】领域进行深度情报综述。\n"
+                "要求：\n"
+                f"1. 仅针对 {domain_cn} 领域的内容进行总结，不要混入其他领域。\n"
+                "2. 归纳当前该领域的核心趋势、重大事件及其潜在影响。\n"
+                "3. 语气要极其专业、客观、敏锐。\n"
+                "4. 字数控制在 300 字以内。\n"
+                "5. 必须使用中文，采用 Markdown 格式（可以包含加粗、列表）。\n\n"
+                "情报内容：\n"
+                f"{context}\n\n"
+                "综述："
+            )
+        else:
+            prompt = (
+                "你是一个资深全球情报分析师。请针对以下各领域的最新动态，提供一份综合简报。\n"
+                "要求：\n"
+                "1. 按领域（经济、技术、学术、全球监控）进行综述。\n"
+                "2. 每个领域的总结要精炼，突出最重要的高热度或高严重度事件。\n"
+                "3. 语气要专业、冷静。\n"
+                "4. 总字数控制在 250 字以内。\n"
+                "5. 必须使用中文，采用 Markdown 格式（使用 ## 分段）。\n\n"
+                "情报内容：\n"
+                f"{context}\n\n"
+                "综述："
+            )
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -78,7 +103,7 @@ class LLMClient:
                             {"role": "user", "content": prompt}
                         ],
                         "temperature": 0.3,
-                        "max_tokens": 300
+                        "max_tokens": 500
                     }
                 )
                 response.raise_for_status()
@@ -90,9 +115,14 @@ class LLMClient:
             logger.error(f"LLMClient: 生成摘要失败: {e}")
             return f"智能化综述暂时不可用 (Error: {str(e)[:50]}...)"
 
-    def _mock_domain_summary(self, domain_groups: dict[str, list[dict]]) -> str:
+    def _mock_domain_summary(self, domain_groups: dict[str, list[dict]], target_domain: Optional[str] = None) -> str:
         """分领域的模拟摘要"""
-        lines = ["【系统综述 (模拟数据)】"]
+        if target_domain and target_domain != "all":
+            name = target_domain
+            items = domain_groups.get(target_domain, [])
+            return f"### {name} 领域深度分析 (模拟)\n\n该领域目前监测到 {len(items)} 条重要动态。主要趋势包括 {items[0].get('title') if items else '暂无数据'} 等。建议持续关注后续演化。"
+
+        lines = ["## 全球情报综述 (模拟数据)"]
         
         mapping = {
             "economy": "经济域",
