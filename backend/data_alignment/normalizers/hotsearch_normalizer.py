@@ -51,10 +51,6 @@ NEWSNOW_META: dict[str, dict] = {
     "tech.oss.github_trending":       {"platform": "github",      "category": "tech",      "geo": None},
     "tech.oss.coolapk":               {"platform": "coolapk",     "category": "android",   "geo": "CN"},
     "tech.oss.toutiao_tech":          {"platform": "toutiao",     "category": "news",      "geo": "CN"},
-    # Legacy fallbacks (optional but good for robustness)
-    "hotsearch.github":               {"platform": "github",      "category": "tech",      "geo": None},
-    "hotsearch.coolapk":              {"platform": "coolapk",     "category": "android",   "geo": "CN"},
-    "hotsearch.toutiao":              {"platform": "toutiao",     "category": "news",      "geo": "CN"},
 }
 
 # 财经源使用金融严重度补充规则

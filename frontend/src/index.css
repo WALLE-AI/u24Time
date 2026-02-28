@@ -184,3 +184,18 @@ h4 {
   font-style: italic;
   margin: 12px 0;
 }
+
+/* ───────────────────────────────────── Indeterminate Progress */
+@keyframes indeterminateProgress {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+.animate-progress {
+  animation: indeterminateProgress 1.5s infinite linear;
+}

@@ -20,6 +20,7 @@ from data_alignment.schema import (
     CanonicalItem,
     SourceType,
     SeverityLevel,
+    HotnessCalculator,
     classify_severity_by_keywords,
 )
 
@@ -99,6 +100,10 @@ class GeoEventNormalizer:
 
         event_date = _parse_iso_date(event.get("event_date") or "")
 
+        # 伤亡人数加分：每人 +0.5，上限 +20
+        fatality_bonus = min(float(fatalities or 0) * 0.5, 20.0)
+        hotness = HotnessCalculator.time_decay_score(severity, event_date, bonus=fatality_bonus)
+
         return CanonicalItem(
             item_id=item_id,
             source_id=source_id,
@@ -112,7 +117,7 @@ class GeoEventNormalizer:
             geo_lon=float(lon) if lon is not None else None,
             geo_country=str(iso).upper() if iso else None,
             geo_region=location,
-            hotness_score=0.0,
+            hotness_score=hotness,
             severity_level=severity,
             raw_engagement={},
             raw_metadata={
@@ -155,6 +160,14 @@ class GeoEventNormalizer:
 
         severity = _severity_from_magnitude(mag)
 
+        # 震级加分：M4.5以上每0.5级 +2.5，上限 +20（M6.5 ≈ +10，M8.5 ≈ +20）
+        try:
+            mag_f = float(mag or 0)
+        except (ValueError, TypeError):
+            mag_f = 0.0
+        mag_bonus = min(max(0.0, (mag_f - 4.5) * 5.0), 20.0)
+        hotness = HotnessCalculator.time_decay_score(severity, published_at, bonus=mag_bonus)
+
         return CanonicalItem(
             item_id=f"geo.usgs:{eq_id}",
             source_id="geo.usgs",
@@ -168,7 +181,7 @@ class GeoEventNormalizer:
             geo_lon=float(lon) if lon is not None else None,
             geo_country=None,
             geo_region=place,
-            hotness_score=0.0,
+            hotness_score=hotness,
             severity_level=severity,
             raw_engagement={},
             raw_metadata={
@@ -213,6 +226,8 @@ class GeoEventNormalizer:
         full_text = f"{title_raw} {row.get('SOURCEURL', '')}"
         severity, cls_src = classify_severity_by_keywords(full_text)
 
+        hotness = HotnessCalculator.time_decay_score(severity, published_at)
+
         return CanonicalItem(
             item_id=f"{source_id}:{event_id}",
             source_id=source_id,
@@ -226,7 +241,7 @@ class GeoEventNormalizer:
             geo_lon=float(lon) if lon else None,
             geo_country=str(country).upper() if country else None,
             geo_region=geo_name,
-            hotness_score=0.0,
+            hotness_score=hotness,
             severity_level=severity,
             raw_engagement={},
             raw_metadata={
@@ -265,6 +280,7 @@ class GeoEventNormalizer:
             from data_alignment.schema import SeverityLevel as SL
             severity = SL.higher(severity, kw_sev)
 
+            hotness = HotnessCalculator.time_decay_score(severity, published_at)
             return CanonicalItem(
                 item_id=f"{source_id}:{rw_id}",
                 source_id=source_id,
@@ -275,6 +291,7 @@ class GeoEventNormalizer:
                 url=url,
                 published_at=published_at,
                 geo_country=geo_country,
+                hotness_score=hotness,
                 severity_level=severity,
                 raw_metadata={"rw_id": rw_id, "status": status, "countries": country_list},
                 categories=["humanitarian", "crisis", "reliefweb"],
@@ -317,6 +334,10 @@ class GeoEventNormalizer:
             raw = f"{lat}:{lon}:{acq_date}:{acq_time}"
             item_id = hashlib.md5(raw.encode()).hexdigest()[:16]
 
+            # FRP 加分：每 100MW +2，上限 +20（FRP≥1000MW ≈ +20）
+            frp_bonus = min(frp / 50.0, 20.0)
+            pub_dt = _parse_iso_date(acq_date)
+            hotness = HotnessCalculator.time_decay_score(severity, pub_dt, bonus=frp_bonus)
             return CanonicalItem(
                 item_id=item_id,
                 source_id=source_id,
@@ -324,10 +345,11 @@ class GeoEventNormalizer:
                 domain=DomainType.GLOBAL,
                 sub_domain=SubDomainType.DISASTER,
                 title=title,
-                published_at=_parse_iso_date(acq_date),
+                published_at=pub_dt,
                 geo_lat=float(lat),
                 geo_lon=float(lon),
                 geo_country=country_id or None,
+                hotness_score=hotness,
                 severity_level=severity,
                 raw_metadata={
                     "frp_mw": frp,

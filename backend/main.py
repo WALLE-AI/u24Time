@@ -481,6 +481,171 @@ def list_domains():
     return ok(domains=result, total_sources=len(registry.all()))
 
 
+@app.route("/api/v1/domains/activity")
+def domain_activity():
+    """
+    返回各域的条目总数、最近 24h 新增量及地区分布，供「域活跃度」面板初始化。
+    地区分布优先使用 geo_country 字段，对无 geo_country 的条目按 source_id 推断。
+    """
+    from datetime import datetime, timezone, timedelta
+    try:
+        from db.session import get_sync_session
+        from db.models import CanonicalItemModel
+        from sqlalchemy import select, func
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        # ── source_id → 地区归因规则 ──────────────────────────────
+        # CN: 中文平台热搜 / 中国财经平台
+        CN_SOURCES = {
+            "hotsearch.weibo", "hotsearch.zhihu", "hotsearch.bilibili",
+            "hotsearch.douyin", "hotsearch.tieba", "hotsearch.toutiao",
+            "hotsearch.xueqiu", "hotsearch.wallstreetcn", "hotsearch.cls",
+            "hotsearch.thepaper", "hotsearch.coolapk",
+            "global.social.weibo_newsnow", "global.social.zhihu_newsnow",
+            "global.social.bilibili_newsnow", "global.social.douyin_newsnow",
+            "global.social.tieba_newsnow", "global.diplomacy.thepaper",
+            "economy.stock.wallstreetcn", "economy.stock.cls_hot",
+            "economy.stock.xueqiu", "tech.oss.coolapk",
+        }
+        # US: 美国科技/安全平台
+        US_SOURCES = {
+            "tech.oss.hackernews", "tech.oss.techcrunch", "tech.oss.github_trending",
+            "tech.oss.trending_repos", "tech.oss.toutiao_tech",
+            "tech.infra.cloud_aws", "tech.infra.cloud_cloudflare",
+            "tech.infra.cloud_gcp", "tech.infra.cloud_vercel",
+            "tech.infra.dev_github", "tech.infra.dev_npm",
+            "tech.infra.comm_slack", "tech.infra.comm_discord",
+            "tech.infra.saas_stripe", "tech.ai.openai_status",
+            "tech.ai.anthropic_status", "tech.ai.replicate_status",
+            "tech.cyber.nvd_cve", "tech.cyber.feodo", "tech.cyber.urlhaus",
+            "economy.stock.yfinance_us",
+        }
+        # Global: 国际学术、全球市场、全球事件
+        GLOBAL_SOURCES_PREFIX = (
+            "academic.", "economy.crypto.", "economy.quant.",
+            "economy.futures.", "economy.trade.",
+            "global.conflict.", "global.disaster.",
+            "global.displacement.", "global.military.",
+        )
+
+        def _classify_source(sid: str, geo_country: str | None) -> str:
+            """把一条记录归到 CN / US / Other(具体国码) / Global"""
+            if sid in CN_SOURCES:
+                return "CN"
+            if sid in US_SOURCES:
+                return "US"
+            # 对 global.* 系列优先使用 geo_country 字段
+            if geo_country and geo_country not in ("CN", "US"):
+                return geo_country  # 具体国码
+            if geo_country == "CN":
+                return "CN"
+            if geo_country == "US":
+                return "US"
+            # 其他按 source_id 前缀归为 Global
+            for prefix in GLOBAL_SOURCES_PREFIX:
+                if sid.startswith(prefix):
+                    return "Global"
+            return "Global"
+
+        with get_sync_session() as session:
+            # 各域总条目数
+            total_stmt = (
+                select(CanonicalItemModel.domain, func.count().label("total"))
+                .where(CanonicalItemModel.domain.isnot(None))
+                .group_by(CanonicalItemModel.domain)
+            )
+            totals = {row.domain: row.total for row in session.execute(total_stmt).all()}
+
+            # 最近 24h 各域新增条目数
+            recent_stmt = (
+                select(CanonicalItemModel.domain, func.count().label("recent"))
+                .where(
+                    CanonicalItemModel.domain.isnot(None),
+                    CanonicalItemModel.crawled_at >= cutoff,
+                )
+                .group_by(CanonicalItemModel.domain)
+            )
+            recents = {row.domain: row.recent for row in session.execute(recent_stmt).all()}
+
+            # 地区分布：按域 + source_id + geo_country 聚合
+            geo_stmt = (
+                select(
+                    CanonicalItemModel.domain,
+                    CanonicalItemModel.source_id,
+                    CanonicalItemModel.geo_country,
+                    func.count().label("n"),
+                )
+                .where(CanonicalItemModel.domain.isnot(None))
+                .group_by(
+                    CanonicalItemModel.domain,
+                    CanonicalItemModel.source_id,
+                    CanonicalItemModel.geo_country,
+                )
+            )
+            geo_rows = session.execute(geo_stmt).all()
+
+        # 按域聚合地区分布（合并数量 ≤3 的国家到 Other）
+        domain_geo: dict[str, dict[str, int]] = {}
+        for row in geo_rows:
+            d = row.domain or ""
+            if not d:
+                continue
+            region = _classify_source(row.source_id, row.geo_country)
+            domain_geo.setdefault(d, {})
+            domain_geo[d][region] = domain_geo[d].get(region, 0) + row.n
+
+        def _compact_geo(raw: dict) -> dict:
+            """把数量极少的小国合并到 Other"""
+            total_n = sum(raw.values()) or 1
+            result: dict[str, int] = {}
+            others = 0
+            for k, v in sorted(raw.items(), key=lambda x: -x[1]):
+                if k in ("CN", "US", "Global") or v / total_n >= 0.02:
+                    result[k] = v
+                else:
+                    others += v
+            if others:
+                result["Other"] = result.get("Other", 0) + others
+            return result
+
+        # 从调度器 stale_cache 中归并各 source 的最近采集时间到域级别
+        _DOMAIN_ALIAS = {"tech": "technology"}
+        domain_last_updated: dict[str, str] = {}
+        for sid, ts in _scheduler._last_success.items():
+            raw = sid.split(".")[0]
+            domain = _DOMAIN_ALIAS.get(raw, raw)
+            iso = ts.isoformat()
+            if domain not in domain_last_updated or iso > domain_last_updated[domain]:
+                domain_last_updated[domain] = iso
+
+        domains = ["global", "economy", "technology", "academic"]
+        result = [
+            {
+                "domain": d,
+                "total_items": totals.get(d, 0),
+                "recent_items": recents.get(d, 0),
+                "last_updated": domain_last_updated.get(d),
+                "geo_distribution": _compact_geo(domain_geo.get(d, {})),
+            }
+            for d in domains
+        ]
+        return ok(data=result)
+
+    except Exception as e:
+        logger.warning(f"/api/v1/domains/activity 查询失败: {e}")
+        return ok(data=[
+            {
+                "domain": d,
+                "total_items": 0,
+                "recent_items": 0,
+                "last_updated": None,
+                "geo_distribution": {},
+            }
+            for d in ["global", "economy", "technology", "academic"]
+        ])
+
+
 @app.route("/api/v1/domains/<domain>/sources", methods=["GET"])
 def domain_sources(domain: str):
     """返回指定域下所有数据源"""
@@ -551,18 +716,12 @@ def crawl_domain(domain: str):
         return err(f"No enabled sources in domain '{domain}'", 400)
 
     launched = [s.source_id for s in enabled]
-    async def _run():
-        async with get_async_session() as session:
-            for source in enabled:
-                try:
-                    if source.crawl_method == "rss":
-                        await _engine.run_rss(feed_ids=[source.source_id.replace("news.rss.", "")], db_session=session)
-                    elif source.crawl_method in ("api", "lib"):
-                        await _engine.run_api(source.source_id, db_session=session)
-                except Exception as e:
-                    logger.warning(f"Failed to crawl {source.source_id}: {e}")
+    for source in enabled:
+        try:
+            _scheduler.trigger(source.source_id)
+        except Exception as e:
+            logger.warning(f"Failed to trigger {source.source_id}: {e}")
 
-    _run_async(_run())
     return ok(
         msg=f"Domain crawl launched for '{domain}'",
         domain=domain,

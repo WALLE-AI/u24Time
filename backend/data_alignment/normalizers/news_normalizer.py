@@ -18,6 +18,7 @@ from data_alignment.schema import (
     CanonicalItem,
     SourceType,
     SeverityLevel,
+    HotnessCalculator,
     classify_severity_by_keywords,
 )
 
@@ -130,6 +131,8 @@ class NewsNormalizer:
             except Exception:
                 pass
 
+        hotness = HotnessCalculator.time_decay_score(severity, published_at)
+
         return CanonicalItem(
             item_id=item_id,
             source_id=source_feed_id,
@@ -139,7 +142,7 @@ class NewsNormalizer:
             author=author,
             url=link or None,
             published_at=published_at,
-            hotness_score=0.0,  # 新闻无互动数据，热度由下游计算
+            hotness_score=hotness,
             severity_level=severity,
             raw_engagement={},
             raw_metadata={

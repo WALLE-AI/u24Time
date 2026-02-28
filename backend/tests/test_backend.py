@@ -253,3 +253,82 @@ def test_rss_sources_allowed_domains():
     for feed in ALL_RSS_FEEDS:
         domain = feed.url.split("/")[2]
         assert domain in ALLOWED_DOMAINS, f"{feed.feed_id} domain not in allowlist"
+
+
+# ── Time-Decay Hotness ────────────────────────────────────────
+
+def test_time_decay_score_critical_recent():
+    """CRITICAL 事件刚发布 → hotness 接近 100"""
+    from data_alignment.schema import HotnessCalculator, SeverityLevel
+    from datetime import datetime, timezone
+    score = HotnessCalculator.time_decay_score(SeverityLevel.CRITICAL, datetime.now(timezone.utc))
+    assert score >= 95.0, f"Expected >=95, got {score}"
+
+
+def test_time_decay_score_info_old():
+    """INFO 事件充分衰减：48h 后 << 原始值，96h 后趋近于 0"""
+    from data_alignment.schema import HotnessCalculator, SeverityLevel
+    from datetime import datetime, timezone, timedelta
+    # 48h: base=15 × e^(-0.035×48) ≈ 2.8，验证确实大幅衰减
+    old_48h = datetime.now(timezone.utc) - timedelta(hours=48)
+    score_48h = HotnessCalculator.time_decay_score(SeverityLevel.INFO, old_48h)
+    assert score_48h < 5.0, f"Expected <5.0 after 48h, got {score_48h}"
+    # 96h: base=15 × e^(-0.035×96) ≈ 0.52，接近 0
+    old_96h = datetime.now(timezone.utc) - timedelta(hours=96)
+    score_96h = HotnessCalculator.time_decay_score(SeverityLevel.INFO, old_96h)
+    assert score_96h < 1.0, f"Expected <1.0 after 96h, got {score_96h}"
+
+
+
+def test_time_decay_score_no_published_at():
+    """published_at=None → 视为刚发布，按 severity 返回合理值"""
+    from data_alignment.schema import HotnessCalculator, SeverityLevel
+    score = HotnessCalculator.time_decay_score(SeverityLevel.HIGH, None)
+    assert 70.0 <= score <= 100.0, f"Expected 70-100 for HIGH with no time, got {score}"
+
+
+def test_time_decay_score_bonus():
+    """附加 bonus 应正确提升分数"""
+    from data_alignment.schema import HotnessCalculator, SeverityLevel
+    from datetime import datetime, timezone
+    base = HotnessCalculator.time_decay_score(SeverityLevel.MEDIUM, datetime.now(timezone.utc))
+    with_bonus = HotnessCalculator.time_decay_score(SeverityLevel.MEDIUM, datetime.now(timezone.utc), bonus=15.0)
+    assert with_bonus > base, "Bonus should increase hotness"
+    assert with_bonus <= 100.0
+
+
+def test_news_normalizer_hotness_nonzero():
+    """新闻条目 published 1 小时前 + HIGH severity → hotness > 30"""
+    from data_alignment.normalizers.news_normalizer import NewsNormalizer
+    from datetime import datetime, timezone, timedelta
+    normalizer = NewsNormalizer()
+    entry = {
+        "title": "Explosion reported near military base",
+        "link":  "https://www.bbc.co.uk/news/99999",
+        "summary": "Large explosion.",
+        "published_parsed": (datetime.now(timezone.utc) - timedelta(hours=1)).timetuple(),
+    }
+    item = normalizer.normalize_from_feedparser(entry, "news.rss.bbc", "geopolitical")
+    assert item is not None
+    assert item.hotness_score > 30.0, f"Expected >30 for recent HIGH news, got {item.hotness_score}"
+
+
+def test_usgs_normalizer_hotness_nonzero():
+    """USGS M7.2 地震 1 小时前 → hotness > 60"""
+    from data_alignment.normalizers.geo_event_normalizer import GeoEventNormalizer
+    from datetime import datetime, timezone, timedelta
+    normalizer = GeoEventNormalizer()
+    ts_ms = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp() * 1000)
+    feature = {
+        "id": "us7000decay_test",
+        "properties": {
+            "mag": 7.2,
+            "place": "100km SE of Tokyo, Japan",
+            "time": ts_ms,
+            "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000decay_test",
+        },
+        "geometry": {"coordinates": [139.7, 35.5, 10.0]},
+    }
+    item = normalizer.normalize_usgs(feature)
+    assert item is not None
+    assert item.hotness_score > 60.0, f"Expected >60 for M7.2 recent quake, got {item.hotness_score}"

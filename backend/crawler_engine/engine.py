@@ -296,6 +296,63 @@ class CrawlerEngine:
 
         return all_items
 
+    # ─── 扩展 API 采集 ────────────────────────────────────
+
+    async def run_custom_adapter(self, source_id: str, fetch_func: Callable, db_session: Optional[AsyncSession] = None) -> list[CanonicalItem]:
+        """
+        运行自定义数据源并追踪为爬虫任务。
+        fetch_func 为异步包装函数，返回 list[CanonicalItem]。
+        """
+        task = CrawlerTask("api", source_ids=[source_id], params={"custom": True})
+        task.status = "running"
+        task.started_at = datetime.now(timezone.utc)
+        self._tasks[task.task_id] = task
+
+        self._emit({"event": "task_start", "task_id": task.task_id, "type": "api", "source_id": source_id})
+
+        all_items: list[CanonicalItem] = []
+        try:
+            all_items = await fetch_func()
+            task.items_fetched = len(all_items)
+            task.items_aligned = len(all_items)
+            task.status = "done"
+            logger.info(f"CrawlerEngine Custom Adapter {source_id}: {task.items_aligned} aligned")
+        except Exception as e:
+            task.status = "failed"
+            task.error_message = str(e)
+            logger.error(f"CrawlerEngine Custom Adapter {source_id} 失败: {e}")
+        finally:
+            task.finished_at = datetime.now(timezone.utc)
+            if db_session:
+                try:
+                    task_model = CrawlTaskModel(
+                        task_id=task.task_id,
+                        source_id=source_id,
+                        task_type="api",
+                        params={"custom": True},
+                        status=task.status,
+                        items_fetched=task.items_fetched,
+                        items_aligned=task.items_aligned,
+                        error_message=task.error_message,
+                        started_at=task.started_at,
+                        finished_at=task.finished_at,
+                    )
+                    db_session.add(task_model)
+                    await db_session.commit()
+                except Exception as e:
+                    logger.error(f"Failed to save CrawlTask to DB: {e}")
+
+            self._emit({
+                "event": "task_done",
+                "task_id": task.task_id,
+                "source_id": source_id,
+                "status": task.status,
+                "items_fetched": task.items_fetched,
+                "items_aligned": task.items_aligned,
+            })
+
+        return all_items
+
     # ─── 热搜采集 (BettaFish NewsNow) ────────────────────────
 
     async def run_hotsearch(

@@ -424,10 +424,6 @@ NEWSNOW_SOURCE_MAP: dict[str, str] = {
     "tech.oss.github_trending":           "github-trending-today",
     "tech.oss.coolapk":                   "coolapk",
     "tech.oss.toutiao_tech":              "toutiao",
-    # Legacy fallbacks
-    "hotsearch.github":                   "github-trending-today",
-    "hotsearch.coolapk":                  "coolapk",
-    "hotsearch.toutiao":                  "toutiao",
 }
 
 

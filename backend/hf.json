@@ -1,0 +1,118 @@
+{
+  "paper": {
+    "id": "2602.23361",
+    "authors": [
+      {
+        "_id": "69a11a51a13deaa4494489bb",
+        "user": {
+          "_id": "692da82ab884a1ba56270557",
+          "avatarUrl": "/avatars/e98409da85032ad2092b77f9fceee784.svg",
+          "isPro": false,
+          "fullname": "Sven Elflein",
+          "user": "sven-el",
+          "type": "user"
+        },
+        "name": "Sven Elflein",
+        "status": "claimed_verified",
+        "statusLastChangedAt": "2026-02-27T16:40:00.776Z",
+        "hidden": false
+      },
+      {
+        "_id": "69a11a51a13deaa4494489bc",
+        "name": "Ruilong Li",
+        "hidden": false
+      },
+      {
+        "_id": "69a11a51a13deaa4494489bd",
+        "name": "S\u00e9rgio Agostinho",
+        "hidden": false
+      },
+      {
+        "_id": "69a11a51a13deaa4494489be",
+        "name": "Zan Gojcic",
+        "hidden": false
+      },
+      {
+        "_id": "69a11a51a13deaa4494489bf",
+        "name": "Laura Leal-Taix\u00e9",
+        "hidden": false
+      },
+      {
+        "_id": "69a11a51a13deaa4494489c0",
+        "name": "Qunjie Zhou",
+        "hidden": false
+      },
+      {
+        "_id": "69a11a51a13deaa4494489c1",
+        "name": "Aljosa Osep",
+        "hidden": false
+      }
+    ],
+    "mediaUrls": [
+      "https://cdn-uploads.huggingface.co/production/uploads/692da82ab884a1ba56270557/MfAsycfptzzlmO0_Y7TYp.gif"
+    ],
+    "publishedAt": "2026-02-26T18:59:33.000Z",
+    "submittedOnDailyAt": "2026-02-27T16:09:16.796Z",
+    "title": "VGG-T^3: Offline Feed-Forward 3D Reconstruction at Scale",
+    "submittedOnDailyBy": {
+      "_id": "692da82ab884a1ba56270557",
+      "avatarUrl": "/avatars/e98409da85032ad2092b77f9fceee784.svg",
+      "isPro": false,
+      "fullname": "Sven Elflein",
+      "user": "sven-el",
+      "type": "user"
+    },
+    "summary": "We present a scalable 3D reconstruction model that addresses a critical limitation in offline feed-forward methods: their computational and memory requirements grow quadratically w.r.t. the number of input images. Our approach is built on the key insight that this bottleneck stems from the varying-length Key-Value (KV) space representation of scene geometry, which we distill into a fixed-size Multi-Layer Perceptron (MLP) via test-time training. VGG-T^3 (Visual Geometry Grounded Test Time Training) scales linearly w.r.t. the number of input views, similar to online models, and reconstructs a 1k image collection in just 54 seconds, achieving a 11.6times speed-up over baselines that rely on softmax attention. Since our method retains global scene aggregation capability, our point map reconstruction error outperforming other linear-time methods by large margins. Finally, we demonstrate visual localization capabilities of our model by querying the scene representation with unseen images.",
+    "upvotes": 11,
+    "discussionId": "69a11a51a13deaa4494489c2",
+    "projectPage": "https://research.nvidia.com/labs/dvl/projects/vgg-ttt/",
+    "ai_summary": "VGG-T\u00b3 addresses scalability issues in 3D reconstruction by transforming variable-length key-value representations into fixed-size MLPs through test-time training, enabling linear scaling with input views and achieving significant speedup over traditional softmax attention methods.",
+    "ai_keywords": [
+      "3D reconstruction",
+      "feed-forward methods",
+      "computational requirements",
+      "memory requirements",
+      "Key-Value space representation",
+      "scene geometry",
+      "Multi-Layer Perceptron",
+      "test-time training",
+      "Visual Geometry Grounded Test Time Training",
+      "softmax attention",
+      "point map reconstruction",
+      "visual localization"
+    ],
+    "organization": {
+      "_id": "60262b67268c201cdc8b7d43",
+      "name": "nvidia",
+      "fullname": "NVIDIA",
+      "avatar": "https://cdn-uploads.huggingface.co/production/uploads/1613114437487-60262a8e0703121c822a80b6.png"
+    }
+  },
+  "publishedAt": "2026-02-26T13:59:33.000Z",
+  "title": "VGG-T^3: Offline Feed-Forward 3D Reconstruction at Scale",
+  "summary": "We present a scalable 3D reconstruction model that addresses a critical limitation in offline feed-forward methods: their computational and memory requirements grow quadratically w.r.t. the number of input images. Our approach is built on the key insight that this bottleneck stems from the varying-length Key-Value (KV) space representation of scene geometry, which we distill into a fixed-size Multi-Layer Perceptron (MLP) via test-time training. VGG-T^3 (Visual Geometry Grounded Test Time Training) scales linearly w.r.t. the number of input views, similar to online models, and reconstructs a 1k image collection in just 54 seconds, achieving a 11.6times speed-up over baselines that rely on softmax attention. Since our method retains global scene aggregation capability, our point map reconstruction error outperforming other linear-time methods by large margins. Finally, we demonstrate visual localization capabilities of our model by querying the scene representation with unseen images.",
+  "mediaUrls": [
+    "https://cdn-uploads.huggingface.co/production/uploads/692da82ab884a1ba56270557/MfAsycfptzzlmO0_Y7TYp.gif"
+  ],
+  "thumbnail": "https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/2602.23361.png",
+  "numComments": 2,
+  "submittedBy": {
+    "_id": "692da82ab884a1ba56270557",
+    "avatarUrl": "/avatars/e98409da85032ad2092b77f9fceee784.svg",
+    "fullname": "Sven Elflein",
+    "name": "sven-el",
+    "type": "user",
+    "isPro": false,
+    "isHf": false,
+    "isHfAdmin": false,
+    "isMod": false,
+    "isUserFollowing": false
+  },
+  "organization": {
+    "_id": "60262b67268c201cdc8b7d43",
+    "name": "nvidia",
+    "fullname": "NVIDIA",
+    "avatar": "https://cdn-uploads.huggingface.co/production/uploads/1613114437487-60262a8e0703121c822a80b6.png"
+  },
+  "isAuthorParticipating": true
+}

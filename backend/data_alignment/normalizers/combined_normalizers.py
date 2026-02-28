@@ -15,6 +15,7 @@ from data_alignment.schema import (
     CanonicalItem,
     SourceType,
     SeverityLevel,
+    HotnessCalculator,
     DomainType,
     SubDomainType,
 )
@@ -164,6 +165,14 @@ class MarketNormalizer:
         else:
             severity = SeverityLevel.INFO
 
+        # 涨跌幅 bonus: |change%| × 1.5，上限 +20
+        change_bonus = min(abs(change) * 1.5, 20.0)
+        hotness = HotnessCalculator.time_decay_score(
+            severity,
+            datetime.now(timezone.utc),  # 市场数据视为「刚采集」
+            bonus=change_bonus,
+        )
+
         return CanonicalItem(
             item_id=item_id,
             source_id="economy.crypto.coingecko",
@@ -175,7 +184,7 @@ class MarketNormalizer:
             author="CoinGecko",
             url=f"https://www.coingecko.com/en/coins/{coin_id}",
             published_at=datetime.now(timezone.utc),
-            hotness_score=0.0,
+            hotness_score=hotness,
             severity_level=severity,
             raw_engagement={},
             raw_metadata={
@@ -229,6 +238,14 @@ class CyberNormalizer:
             except ValueError:
                 pass
 
+        # online C2 站点：视为「刚发现」，无时间衰减；offline 正常衰减
+        if status.lower() == "online":
+            hotness = HotnessCalculator.time_decay_score(
+                severity, datetime.now(timezone.utc)
+            )
+        else:
+            hotness = HotnessCalculator.time_decay_score(severity, published_at)
+
         return CanonicalItem(
             item_id=item_id,
             source_id="tech.cyber.feodo",
@@ -241,7 +258,7 @@ class CyberNormalizer:
             url=f"https://feodotracker.abuse.ch/browse/host/{ip}/",
             published_at=published_at,
             geo_country=str(country).upper() if country else None,
-            hotness_score=0.0,
+            hotness_score=hotness,
             severity_level=severity,
             raw_engagement={},
             raw_metadata={
@@ -282,6 +299,14 @@ class CyberNormalizer:
             except ValueError:
                 pass
 
+        # online 恶意 URL：视为「刚发现」，无时间衰减；offline 按发布时间衰减
+        if url_status == "online":
+            hotness = HotnessCalculator.time_decay_score(
+                severity, datetime.now(timezone.utc)
+            )
+        else:
+            hotness = HotnessCalculator.time_decay_score(severity, published_at)
+
         return CanonicalItem(
             item_id=item_id,
             source_id="tech.cyber.urlhaus",
@@ -293,7 +318,7 @@ class CyberNormalizer:
             author="URLhaus",
             url=url_str,
             published_at=published_at,
-            hotness_score=0.0,
+            hotness_score=hotness,
             severity_level=severity,
             raw_engagement={},
             raw_metadata={

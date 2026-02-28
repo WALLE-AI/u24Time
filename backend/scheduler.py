@@ -217,6 +217,21 @@ class DataScheduler:
         WorldMonitor stale-while-revalidate 模式：失败不清空缓存，只记录错误。
         """
         logger.debug(f"DataScheduler: 开始采集 {source_id}")
+
+        # Normalize prefix to frontend tab domain IDs
+        # source_id prefix "tech" → frontend tab "technology"
+        _raw_domain = source_id.split(".")[0]
+        _DOMAIN_ALIAS = {"tech": "technology"}
+        _domain = _DOMAIN_ALIAS.get(_raw_domain, _raw_domain)
+
+        if self._broadcast:
+            self._broadcast({
+                "event": "scheduler_start",
+                "source_id": source_id,
+                "domain": _domain,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+
         try:
             # 优化点：不再在调度层开启长期 DB 会话。改为让引擎/管道按需开启短连接。
             # 这能有效防止因大量并行网络 I/O 长期占用 DB 连接池导致的任务挂起。
@@ -230,6 +245,7 @@ class DataScheduler:
                 self._broadcast({
                     "event": "scheduler_done",
                     "source_id": source_id,
+                    "domain": _domain,  # e.g. "economy", "global", "technology", "academic"
                     "items_count": len(items),
                     "timestamp": self._last_success[source_id].isoformat(),
                 })
@@ -238,6 +254,15 @@ class DataScheduler:
         except Exception as e:
             logger.warning(f"DataScheduler: {source_id} 采集失败（stale cache 保留）→ {e}")
             # stale-while-revalidate: 不清空 last_success，允许前端使用旧数据
+            if self._broadcast:
+                self._broadcast({
+                    "event": "scheduler_error",
+                    "source_id": source_id,
+                    "domain": _domain,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "error": str(e),
+                    "items_count": self._last_count.get(source_id, 0),
+                })
 
     async def _dispatch_crawl(self, source_id: str, db_session=None) -> list:
         """
@@ -248,7 +273,7 @@ class DataScheduler:
             YahooFinanceAdapter, FearGreedAdapter, BtcHashrateAdapter,
             HuggingFaceAdapter, CloudStatusAdapter, NVDAdapter,
             ReliefWebAdapter, PolymarketAdapter, HackerNewsAdapter,
-            SemanticScholarAdapter, TechEventsAdapter,
+            SemanticScholarAdapter,
         )
         from data_alignment.pipeline import AlignmentPipeline
 
@@ -256,34 +281,44 @@ class DataScheduler:
 
         # ── 云/AI 服务状态 (CloudStatusAdapter) ─────────────────
         if source_id.startswith("tech.infra.") or source_id.startswith("tech.ai."):
-            adapter = CloudStatusAdapter()
-            results = await adapter.fetch_all([source_id])
-            if source_id in results:
-                return await pipeline.align_and_save(source_id, [results[source_id]], db_session=db_session)
-            return []
+            async def _do_cloud():
+                adapter = CloudStatusAdapter()
+                results = await adapter.fetch_all([source_id])
+                if source_id in results:
+                    return await pipeline.align_and_save(source_id, [results[source_id]], db_session=db_session)
+                return []
+            return await self._engine.run_custom_adapter(source_id, _do_cloud, db_session=db_session)
 
         # ── 股票/指数 (Yahoo Finance) ─────────────────────────
         if source_id in ("economy.stock.yfinance_us", "economy.stock.country_index"):
-            adapter = YahooFinanceAdapter()
-            rows = await adapter.fetch_indices()
-            return await pipeline.align_and_save(source_id, rows, meta={"symbol": ""}, db_session=db_session)
+            async def _do_yfinance_indices():
+                adapter = YahooFinanceAdapter()
+                rows = await adapter.fetch_indices()
+                return await pipeline.align_and_save(source_id, rows, meta={"symbol": ""}, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_yfinance_indices, db_session=db_session)
 
         if source_id == "economy.futures.commodity_quotes":
-            adapter = YahooFinanceAdapter()
-            rows = await adapter.fetch_commodities()
-            return await pipeline.align_and_save(source_id, rows, meta={"symbol": ""}, db_session=db_session)
+            async def _do_yfinance_futures():
+                adapter = YahooFinanceAdapter()
+                rows = await adapter.fetch_commodities()
+                return await pipeline.align_and_save(source_id, rows, meta={"symbol": ""}, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_yfinance_futures, db_session=db_session)
 
         # ── Fear & Greed ──────────────────────────────────────
         if source_id == "economy.quant.fear_greed_index":
-            adapter = FearGreedAdapter()
-            rows = await adapter.fetch(limit=1)
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            async def _do_fear_greed():
+                adapter = FearGreedAdapter()
+                rows = await adapter.fetch(limit=1)
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_fear_greed, db_session=db_session)
 
         # ── Bitcoin Hashrate ──────────────────────────────────
         if source_id == "economy.quant.mempool_hashrate":
-            adapter = BtcHashrateAdapter()
-            data = await adapter.fetch()
-            return await pipeline.align_and_save(source_id, [data], db_session=db_session)
+            async def _do_mempool():
+                adapter = BtcHashrateAdapter()
+                data = await adapter.fetch()
+                return await pipeline.align_and_save(source_id, [data], db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_mempool, db_session=db_session)
 
         # ── arXiv RSS Papers ─────────────────────────────────
         if source_id.startswith("academic.arxiv."):
@@ -291,45 +326,56 @@ class DataScheduler:
 
         # ── HuggingFace Daily Papers ──────────────────────────
         if source_id == "academic.huggingface.papers":
-            adapter = HuggingFaceAdapter()
-            rows = await adapter.fetch()
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            async def _do_hf():
+                adapter = HuggingFaceAdapter()
+                rows = await adapter.fetch()
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_hf, db_session=db_session)
 
         # ── Semantic Scholar Trending ────────────────────────
         if source_id == "academic.semantic_scholar.trending":
-            adapter = SemanticScholarAdapter()
-            rows = await adapter.fetch_trending(query="AI")
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            async def _do_scholar():
+                adapter = SemanticScholarAdapter()
+                rows = await adapter.fetch_trending(query="AI")
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_scholar, db_session=db_session)
 
         # ── NVD CVE ───────────────────────────────────────────
         if source_id == "tech.cyber.nvd_cve":
-            adapter = NVDAdapter()
-            rows = await adapter.fetch_recent()
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            async def _do_nvd():
+                adapter = NVDAdapter()
+                rows = await adapter.fetch_recent()
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_nvd, db_session=db_session)
 
         # ── ReliefWeb 人道危机 ─────────────────────────────────
         if source_id == "global.conflict.humanitarian":
-            adapter = ReliefWebAdapter()
-            rows = await adapter.fetch_disasters()
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            async def _do_reliefweb():
+                adapter = ReliefWebAdapter()
+                rows = await adapter.fetch_disasters()
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_reliefweb, db_session=db_session)
 
         # ── Polymarket ────────────────────────────────────────
         if source_id == "academic.prediction.polymarket":
-            adapter = PolymarketAdapter()
-            rows = await adapter.fetch_active()
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            async def _do_polymarket():
+                adapter = PolymarketAdapter()
+                rows = await adapter.fetch_active()
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_polymarket, db_session=db_session)
 
         # ── Hacker News ───────────────────────────────────────
         if source_id == "tech.oss.hackernews":
-            adapter = HackerNewsAdapter()
-            rows = await adapter.fetch_top_stories()
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            async def _do_hackernews():
+                adapter = HackerNewsAdapter()
+                rows = await adapter.fetch_top_stories()
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_hackernews, db_session=db_session)
 
         # ── Tech Events ───────────────────────────────────────
         if source_id == "tech.oss.tech_events":
-            adapter = TechEventsAdapter()
-            rows = await adapter.fetch_events()
-            return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            # Adapter not yet implemented
+            return []
 
         # ── 加密货币 (CoinGecko，复用 engine) ─────────────────
         if source_id == "economy.crypto.coingecko":
@@ -363,22 +409,21 @@ class DataScheduler:
 
         # ── NewsNow 热搜系列 ──────────────────────────────────
         _NEWSNOW_SOURCES = {
-            "global.social.weibo_newsnow":    "hotsearch.weibo",
-            "global.social.zhihu_newsnow":    "hotsearch.zhihu",
-            "global.social.bilibili_newsnow":  "hotsearch.bilibili",
-            "global.social.douyin_newsnow":   "hotsearch.douyin",
-            "global.social.tieba_newsnow":    "hotsearch.tieba",
-            "economy.stock.wallstreetcn":      "hotsearch.wallstreetcn",
-            "economy.stock.cls_hot":           "hotsearch.cls",
-            "economy.stock.xueqiu":           "hotsearch.xueqiu",
-            "global.diplomacy.thepaper":       "hotsearch.thepaper",
-            "tech.oss.github_trending":        "hotsearch.github",
-            "tech.oss.coolapk":               "hotsearch.coolapk",
-            "tech.oss.toutiao_tech":           "hotsearch.toutiao",
+            "global.social.weibo_newsnow",
+            "global.social.zhihu_newsnow",
+            "global.social.bilibili_newsnow",
+            "global.social.douyin_newsnow",
+            "global.social.tieba_newsnow",
+            "economy.stock.wallstreetcn",
+            "economy.stock.cls_hot",
+            "economy.stock.xueqiu",
+            "global.diplomacy.thepaper",
+            "tech.oss.github_trending",
+            "tech.oss.coolapk",
+            "tech.oss.toutiao_tech",
         }
         if source_id in _NEWSNOW_SOURCES:
-            legacy_sid = _NEWSNOW_SOURCES[source_id]
-            return await self._engine.run_hotsearch(source_ids=[legacy_sid], db_session=db_session)
+            return await self._engine.run_hotsearch(source_ids=[source_id], db_session=db_session)
 
         logger.warning(f"DataScheduler: 未知 source_id={source_id}，跳过")
         return []

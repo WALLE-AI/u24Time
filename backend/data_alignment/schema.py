@@ -203,6 +203,60 @@ class HotnessCalculator:
         raw = cls.compute_raw(engagement)
         return cls.normalize(raw, max_score)
 
+    # ── 时间衰减热度（新闻/事件类专用）────────────────────────
+
+    _SEVERITY_BASE: dict = {
+        "critical": 100.0,
+        "high":      80.0,
+        "medium":    55.0,
+        "low":       30.0,
+        "info":      15.0,
+    }
+
+    @classmethod
+    def severity_base(cls, severity: str) -> float:
+        """severity 字符串 → 基础热度分"""
+        return cls._SEVERITY_BASE.get(severity, 15.0)
+
+    @classmethod
+    def time_decay_score(
+        cls,
+        severity: str,
+        published_at: "Optional[datetime]",
+        *,
+        base_override: "Optional[float]" = None,
+        bonus: float = 0.0,
+        decay_lambda: float = 0.035,
+    ) -> float:
+        """
+        基于 severity + 发布时间的指数衰减热度。
+
+        公式:
+            age_hours = max(0, (now - published_at).total_seconds() / 3600)
+            hotness   = (base + bonus) × e^(-λ × age_hours)
+
+        参数:
+            severity      - SeverityLevel 字符串，决定基础分
+            published_at  - 发布时间 (UTC aware datetime)，None 时取当前时间
+            base_override - 手动覆盖基础分（忽略 severity）
+            bonus         - 附加量化加分（如震级、伤亡数、涨跌幅换算）
+            decay_lambda  - 衰减系数（默认 0.035，CRITICAL 半衰期 ≈ 20h）
+
+        返回:
+            float in [0.0, 100.0]
+        """
+        base = base_override if base_override is not None else cls.severity_base(severity)
+        total_base = min(base + bonus, 100.0)
+
+        if published_at is not None:
+            now = datetime.now(timezone.utc)
+            age_hours = max(0.0, (now - published_at).total_seconds() / 3600.0)
+        else:
+            age_hours = 0.0  # 无发布时间，视为刚发布
+
+        decayed = total_base * math.exp(-decay_lambda * age_hours)
+        return round(min(100.0, max(0.0, decayed)), 4)
+
 
 # ─── 经济领域元数据 ───────────────────────────────────────────
 

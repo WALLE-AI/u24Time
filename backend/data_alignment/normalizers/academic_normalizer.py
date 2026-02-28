@@ -206,7 +206,7 @@ class AcademicNormalizer:
             market_id = market.get("id", "")
             title = market.get("title", market.get("question", ""))
             yes_price = market.get("yesPrice", 0.5)
-            volume = market.get("volume", 0)
+            volume = float(market.get("volume", 0))
             url = market.get("url", f"https://polymarket.com/market/{market.get('slug', market_id)}")
 
             # High confidence (>80% or <20%) → MEDIUM severity
