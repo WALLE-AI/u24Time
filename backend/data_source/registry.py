@@ -53,9 +53,9 @@ ALL_SOURCES: list[DataSourceConfig] = [
     _s("economy.stock.country_index", "全球股票指数 (Yahoo)", "market", "Yahoo Finance 40+国家主要指数 (S&P500/CSI300/Nikkei...)", "api", "economy", "stock", health="https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=1mo&interval=1d", tags=["global","index","yahoo"]),
     _s("economy.stock.sector_summary", "行业板块 (Yahoo ETF)", "market", "Yahoo Finance Sector ETF行情", "api", "economy", "stock", health="https://query1.finance.yahoo.com/v8/finance/chart/XLK?range=1mo&interval=1d", tags=["sector","etf","yahoo"]),
     _s("economy.stock.eastmoney_news", "东方财富股票新闻", "market", "EastMoney search-api-web 个股新闻", "api", "economy", "stock", health="https://www.eastmoney.com", tags=["china","news","eastmoney"]),
-    _s("economy.stock.wallstreetcn", "华尔街见闻 (NewsNow)", "hotsearch", "华尔街见闻中文财经快讯", "api", "economy", "stock", health="https://newsnow.busiyi.world/api/s?id=wallstreetcn&latest", tags=["china","finance","news"]),
-    _s("economy.stock.cls_hot", "财联社热榜 (NewsNow)", "hotsearch", "财联社国内财经资讯热榜", "api", "economy", "stock", health="https://newsnow.busiyi.world/api/s?id=cls-hot&latest", tags=["china","finance","market"]),
-    _s("economy.stock.xueqiu", "雪球热帖 (NewsNow)", "hotsearch", "雪球股票投资社区热帖", "api", "economy", "stock", health="https://newsnow.busiyi.world/api/s?id=xueqiu&latest", tags=["china","finance","stock"]),
+    _s("economy.stock.wallstreetcn", "华尔街见闻 (NewsNow)", "hotsearch", "华尔街见闻中文财经快讯", "api", "economy", "finance", health="https://newsnow.busiyi.world/api/s?id=wallstreetcn&latest", tags=["china","finance","news"]),
+    _s("economy.stock.cls_hot", "财联社热榜 (NewsNow)", "hotsearch", "财联社国内财经资讯热榜", "api", "economy", "finance", health="https://newsnow.busiyi.world/api/s?id=cls-hot&latest", tags=["china","finance","market"]),
+    _s("economy.stock.xueqiu", "雪球热帖 (NewsNow)", "hotsearch", "雪球股票投资社区热帖", "api", "economy", "finance", health="https://newsnow.busiyi.world/api/s?id=xueqiu&latest", tags=["china","finance","stock"]),
 
     # ── futures ───────────────────────────────────────────────────
     _s("economy.futures.akshare_shfe", "AKShare 上期所期货", "market", "AKShare futures_main_sina() 上海期货交易所", "lib", "economy", "futures", tags=["china","futures","shfe"]),
@@ -94,17 +94,21 @@ ALL_SOURCES: list[DataSourceConfig] = [
 
     # ── oss ───────────────────────────────────────────────────────
     _s("tech.oss.github_trending", "GitHub 每日趋势 (NewsNow)", "hotsearch", "GitHub每日 trending 项目聚合", "api", "technology", "oss", health="https://newsnow.busiyi.world/api/s?id=github-trending-today&latest", tags=["github","oss","tech"]),
-    _s("tech.oss.hackernews", "Hacker News", "news", "HN Firebase API hacker-news.firebaseio.com", "api", "technology", "oss", health="https://hacker-news.firebaseio.com/v0/topstories.json", tags=["hackernews","tech","dev"]),
-    _s("tech.oss.tech_events", "Tech 会议活动", "news", "worldmonitor list-tech-events 多来源技术会议聚合", "api", "technology", "oss", tags=["conference","tech","events"]),
+    _s("tech.oss.hackernews", "Hacker News", "news", "HN Firebase API hacker-news.firebaseio.com", "api", "technology", "tech_news", health="https://hacker-news.firebaseio.com/v0/topstories.json", tags=["hackernews","tech","dev"]),
+    _s("tech.oss.tech_events", "Tech 会议活动", "news", "worldmonitor list-tech-events 多来源技术会议聚合", "api", "technology", "tech_news", tags=["conference","tech","events"]),
     _s("tech.oss.trending_repos", "GitHub Trending (scraper)", "news", "GitHub trending页面爬虫", "playwright", "technology", "oss", health="https://github.com/trending", tags=["github","trending","oss"]),
-    _s("tech.oss.techcrunch", "TechCrunch", "news", "TechCrunch Tech News RSS", "rss", "technology", "oss", health="https://techcrunch.com/feed/", tags=["english","tech","news"]),
-    _s("tech.oss.coolapk", "酷安热榜 (NewsNow)", "hotsearch", "酷安 Android 应用社区热榜", "api", "technology", "oss", health="https://newsnow.busiyi.world/api/s?id=coolapk&latest", tags=["china","android","coolapk"]),
-    _s("tech.oss.toutiao_tech", "今日头条科技 (NewsNow)", "hotsearch", "今日头条科技频道热榜", "api", "technology", "oss", health="https://newsnow.busiyi.world/api/s?id=toutiao&latest", tags=["china","toutiao","tech"]),
+    _s("tech.oss.techcrunch", "TechCrunch", "news", "TechCrunch Tech News RSS", "rss", "technology", "tech_news", health="https://techcrunch.com/feed/", tags=["english","tech","news"]),
+    _s("tech.oss.coolapk", "酷安热榜 (NewsNow)", "hotsearch", "酷安 Android 应用社区热榜", "api", "technology", "tech_news", health="https://newsnow.busiyi.world/api/s?id=coolapk&latest", tags=["china","android","coolapk"]),
+    _s("tech.oss.toutiao_tech", "今日头条科技 (NewsNow)", "hotsearch", "今日头条科技频道热榜", "api", "technology", "tech_news", health="https://newsnow.busiyi.world/api/s?id=toutiao&latest", tags=["china","toutiao","tech"]),
 
     # ── ai_service ────────────────────────────────────────────────
     _s("tech.ai.openai_status", "OpenAI 服务状态", "geo", "status.openai.com API服务健康", "api", "technology", "ai_service", health="https://status.openai.com/api/v2/status.json", tags=["openai","ai","status"]),
     _s("tech.ai.anthropic_status", "Anthropic 服务状态", "geo", "status.claude.com Claude服务健康", "api", "technology", "ai_service", health="https://status.claude.com/api/v2/status.json", tags=["anthropic","claude","ai","status"]),
     _s("tech.ai.replicate_status", "Replicate 服务状态", "geo", "replicatestatus.com API健康", "api", "technology", "ai_service", health="https://www.replicatestatus.com/api/v2/status.json", tags=["replicate","ai","status"]),
+    _s("tech.ai.hf_models", "HuggingFace 热门模型", "social", "HuggingFace Trending Models", "api", "technology", "ai_model", health="https://huggingface.co/api/models?sort=trending&limit=1", tags=["huggingface","ai","model"]),
+    _s("tech.ai.hf_datasets", "HuggingFace 热门数据集", "social", "HuggingFace Trending Datasets", "api", "technology", "ai_dataset", health="https://huggingface.co/api/datasets?sort=trending&limit=1", tags=["huggingface","ai","dataset"]),
+    _s("tech.ai.ms_models", "ModelScope 热门模型", "social", "ModelScope Popular Models", "api", "technology", "ai_model", health="https://modelscope.cn/api/v1/models", tags=["modelscope","ai","model"]),
+    _s("tech.ai.ms_datasets", "ModelScope 热门数据集", "social", "ModelScope Popular Datasets", "api", "technology", "ai_dataset", health="https://modelscope.cn/api/v1/datasets", tags=["modelscope","ai","dataset"]),
     _s("tech.ai.huggingface_papers", "HuggingFace Daily Papers", "news", "HuggingFace 每日AI论文推荐 (归属Academic)", "api", "academic", "paper", health="https://huggingface.co/api/daily_papers", tags=["huggingface","ai","paper"]),
 
     # ── cyber ─────────────────────────────────────────────────────

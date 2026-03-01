@@ -410,6 +410,14 @@ def list_items():
                 stmt = stmt.where(CanonicalItemModel.source_type == source_type)
             if source_id:
                 stmt = stmt.where(CanonicalItemModel.source_id == source_id)
+            
+            source_prefix = request.args.get("source_prefix")
+            if source_prefix:
+                stmt = stmt.where(CanonicalItemModel.source_id.startswith(source_prefix))
+
+            sub_domain = request.args.get("sub_domain")
+            if sub_domain and sub_domain != "all":
+                stmt = stmt.where(CanonicalItemModel.sub_domain == sub_domain)
             if severity:
                 stmt = stmt.where(CanonicalItemModel.severity_level == severity)
             stmt = stmt.offset((page - 1) * limit).limit(limit)

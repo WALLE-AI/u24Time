@@ -130,6 +130,11 @@ class AlignmentPipeline:
         if config:
             if config.crawl_method == "rss":
                 feed_category = meta.get("feed_category", config.domain or "news")
+                if source_id.startswith("academic.arxiv."):
+                    return [
+                        item for row in rows
+                        if (item := self._academic.normalize_arxiv_paper(row, source_id.split(".")[-1])) is not None
+                    ]
                 return self._news.normalize_batch_from_feedparser(rows, source_id, feed_category)
             
             if config.source_type == "hotsearch" or source_id.endswith("_newsnow"):
@@ -152,7 +157,11 @@ class AlignmentPipeline:
 
         # ── arXiv / 学术 RSS (academic.arxiv.*) ─────────────
         if source_id.startswith("academic.arxiv."):
-            return self._news.normalize_batch_from_feedparser(rows, source_id, "academic")
+            category = source_id.split(".")[-1]
+            return [
+                item for row in rows
+                if (item := self._academic.normalize_arxiv_paper(row, category)) is not None
+            ]
 
         # ── HuggingFace 每日论文 ──────────────────────────────
         if source_id == "academic.huggingface.papers":

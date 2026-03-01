@@ -281,5 +281,80 @@ class TechNormalizer:
             item.categories = ["ai", "status", status.get("id", "")]
         return item
 
+    # ──────────────────────────────────────────────────────────────
+    # AI Trend: Hugging Face Models/Datasets
+    # ──────────────────────────────────────────────────────────────
+    def normalize_hf_trend(self, item: dict, source_id: str = "tech.ai.hf_models") -> Optional[CanonicalItem]:
+        """HuggingFace API model/dataset item"""
+        try:
+            name = item.get("id", item.get("modelId", ""))
+            author = item.get("author", "")
+            likes = item.get("likes", 0)
+            downloads = item.get("downloads", 0)
+            tags = item.get("tags", [])
+            is_dataset = "dataset" in source_id
+
+            title = f"🤗 {name}"
+            if downloads:
+                title += f" [⬇️ {downloads}]"
+            
+            body = f"Author: {author} | Likes: {likes}\nTags: {', '.join(tags[:5])}"
+
+            return CanonicalItem(
+                item_id=_make_id(source_id, name),
+                source_id=source_id,
+                source_type=SourceType.SOCIAL,
+                domain=DomainType.TECH,
+                sub_domain=SubDomainType.OSS,
+                title=title,
+                body=body,
+                url=f"https://huggingface.co/{'datasets/' if is_dataset else ''}{name}",
+                published_at=_now_ts(),
+                crawled_at=_now_ts(),
+                severity_level=SeverityLevel.HIGH if downloads > 1000 else SeverityLevel.INFO,
+                raw_engagement={"likes": likes, "downloads": downloads},
+                raw_metadata={"tags": tags, "author": author},
+                categories=["huggingface", "ai", "dataset" if is_dataset else "model"],
+            )
+        except Exception:
+            return None
+
+    # ──────────────────────────────────────────────────────────────
+    # AI Trend: ModelScope Models/Datasets
+    # ──────────────────────────────────────────────────────────────
+    def normalize_ms_trend(self, item: dict, source_id: str = "tech.ai.ms_models") -> Optional[CanonicalItem]:
+        """ModelScope API model/dataset item"""
+        try:
+            namespace = item.get("Namespace", "")
+            name = item.get("Name", "")
+            full_name = f"{namespace}/{name}"
+            description = item.get("Description", "")
+            views = item.get("ViewCount", 0)
+            downloads = item.get("DownloadCount", 0)
+            is_dataset = "dataset" in source_id
+
+            title = f"💠 {full_name}"
+            if views:
+                title += f" [👁️ {views}]"
+            
+            return CanonicalItem(
+                item_id=_make_id(source_id, full_name),
+                source_id=source_id,
+                source_type=SourceType.SOCIAL,
+                domain=DomainType.TECH,
+                sub_domain=SubDomainType.OSS,
+                title=title,
+                body=description[:300],
+                url=f"https://modelscope.cn/{'datasets/' if is_dataset else 'models/'}{full_name}/summary",
+                published_at=_now_ts(),
+                crawled_at=_now_ts(),
+                severity_level=SeverityLevel.HIGH if views > 1000 else SeverityLevel.INFO,
+                raw_engagement={"views": views, "downloads": downloads},
+                raw_metadata={"namespace": namespace, "name": name},
+                categories=["modelscope", "ai", "dataset" if is_dataset else "model"],
+            )
+        except Exception:
+            return None
+
 
 tech_normalizer = TechNormalizer()

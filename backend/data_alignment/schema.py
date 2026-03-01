@@ -43,9 +43,12 @@ class SubDomainType:
     CRYPTO      = "crypto"      # 数字货币
     # Technology
     OSS         = "oss"         # 开源/开发者生态
+    TECH_NEWS   = "tech_news"   # 技术资讯/社区热榜
     CYBER       = "cyber"       # 网络安全
     INFRA       = "infra"       # 互联网基础设施
     AI_SERVICE  = "ai_service"  # AI 服务监控
+    AI_MODEL    = "ai_model"    # AI 模型趋势
+    AI_DATASET  = "ai_dataset"  # AI 数据集趋势
     # Academic
     PAPER       = "paper"       # 研究论文
     PATENT      = "patent"      # 专利

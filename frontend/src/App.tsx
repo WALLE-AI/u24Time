@@ -139,7 +139,23 @@ function HotPanelItems({ items }: { items: any[] }) {
           <span style={{ width: 22, textAlign: 'center', fontWeight: 900, fontSize: 13, color: item.rank <= 3 ? '#ff5c00' : '#555' }}>
             {item.rank}
           </span>
-          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{item.title}</span>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{item.title}</span>
+            {item.raw_domain === 'academic' && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {item.categories && item.categories.length > 0 && item.categories.slice(0, 2).map((c: string, idx: number) => (
+                  <span key={c + idx} style={{ padding: '1px 5px', background: 'rgba(192, 132, 252, 0.1)', color: '#c084fc', borderRadius: 3, fontSize: 9, border: '1px solid rgba(192, 132, 252, 0.3)' }}>
+                    {c}
+                  </span>
+                ))}
+                {item.sub_domain && (
+                  <span style={{ padding: '1px 5px', background: 'rgba(52, 211, 153, 0.1)', color: '#34d399', borderRadius: 3, fontSize: 9, border: '1px solid rgba(52, 211, 153, 0.3)' }}>
+                    {item.sub_domain === 'paper' ? '论文' : item.sub_domain}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
           <span style={{ fontSize: 11, color: domainColor(item.raw_domain), fontWeight: 700, minWidth: 32 }}>{item.domain}</span>
           <HeatBar value={item.heat} />
           <span style={{ fontSize: 11, color: '#666', minWidth: 28, textAlign: 'right' }}>{item.heat}</span>
@@ -375,6 +391,9 @@ export default function App() {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [totalItems, setTotalItems] = useState(0);
   const [sidebarTab, setSidebarTab] = useState<'feed' | 'sources' | 'tasks'>('feed');
+  const [economySubCategory, setEconomySubCategory] = useState('all');
+  const [techSubCategory, setTechSubCategory] = useState('all');
+  const [academicSubCategory, setAcademicSubCategory] = useState('all');
 
   // Real dynamic states
   const [hotItems, setHotItems] = useState<any[]>([]);
@@ -496,6 +515,15 @@ export default function App() {
       url.searchParams.append('limit', '20');
       if (domain && domain !== 'all') {
         url.searchParams.append('domain', domain);
+        if (domain === 'economy' && economySubCategory !== 'all') {
+          url.searchParams.append('sub_domain', economySubCategory);
+        }
+        if (domain === 'technology' && techSubCategory !== 'all') {
+          url.searchParams.append('sub_domain', techSubCategory);
+        }
+        if (domain === 'academic' && academicSubCategory !== 'all') {
+          url.searchParams.append('sub_domain', academicSubCategory);
+        }
       }
 
       const respItems = await fetch(url.toString());
@@ -515,6 +543,8 @@ export default function App() {
             url: item.url,
             domain: domainLabelMap[item.domain] || '综合',
             raw_domain: item.domain,
+            sub_domain: item.sub_domain,
+            categories: item.categories || [],
             heat: item.hotness_score || 0
           };
         }));
@@ -660,8 +690,40 @@ export default function App() {
 
   useEffect(() => {
     fetchData(activeTab);
-    fetchSummary(activeTab);
-  }, [activeTab]);
+  }, [activeTab, economySubCategory, techSubCategory, academicSubCategory]);
+
+  // Economy 1-minute auto-refresh timer
+  useEffect(() => {
+    if (activeTab === 'economy') {
+      const timer = setInterval(() => {
+        addLog({ level: 'INFO', domain: 'ECON', msg: '触发生发经济数据 60s 周期性刷新' });
+        fetchData('economy');
+      }, 60000);
+      return () => clearInterval(timer);
+    }
+  }, [activeTab, economySubCategory, addLog]);
+
+  // Tech 5-minute auto-refresh timer
+  useEffect(() => {
+    if (activeTab === 'technology') {
+      const timer = setInterval(() => {
+        addLog({ level: 'INFO', domain: 'TECH', msg: '触发生发技术数据 300s 周期性刷新' });
+        fetchData('technology');
+      }, 300000);
+      return () => clearInterval(timer);
+    }
+  }, [activeTab, techSubCategory, addLog]);
+
+  // Academic 5-minute auto-refresh timer
+  useEffect(() => {
+    if (activeTab === 'academic') {
+      const timer = setInterval(() => {
+        addLog({ level: 'INFO', domain: 'ACAD', msg: '触发生发学术数据 300s 周期性刷新' });
+        fetchData('academic');
+      }, 300000);
+      return () => clearInterval(timer);
+    }
+  }, [activeTab, academicSubCategory, addLog]);
 
   useEffect(() => {
     fetchTaskCenter();
@@ -736,11 +798,92 @@ export default function App() {
           {/* Main content grid - Now single column for focus */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <PanelBox
-              title="热搜排行"
+              title={activeTab === 'economy' ? "经济动态排名" : "热搜排行"}
               icon={<TrendingUp size={14} />}
-              badge="数据源更新即刷新"
+              badge={activeTab === 'economy' ? "1分钟自动刷新" : "数据源更新即刷新"}
               count={hotItems.length}
               style={{ minHeight: 480 }}
+              actions={(
+                <>
+                  {activeTab === 'economy' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
+                      <select
+                        value={economySubCategory}
+                        onChange={(e) => setEconomySubCategory(e.target.value)}
+                        style={{
+                          background: '#1a1a1a',
+                          color: '#fff',
+                          border: '1px solid #333',
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 2,
+                          cursor: 'pointer',
+                          outline: 'none'
+                        }}
+                      >
+                        <option value="all">全部动态</option>
+                        <option value="stock">股市/全球指数</option>
+                        <option value="finance">实时财经快讯</option>
+                        <option value="crypto">加密货币价格</option>
+                        <option value="futures">黄金/有色金属/大宗</option>
+                        <option value="quant">市场情绪/量化</option>
+                      </select>
+                    </div>
+                  )}
+                  {activeTab === 'technology' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
+                      <select
+                        value={techSubCategory}
+                        onChange={(e) => setTechSubCategory(e.target.value)}
+                        style={{
+                          background: '#1a1a1a',
+                          color: '#fff',
+                          border: '1px solid #333',
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 2,
+                          cursor: 'pointer',
+                          outline: 'none'
+                        }}
+                      >
+                        <option value="all">全部动态</option>
+                        <option value="oss">GitHub 项目趋势</option>
+                        <option value="tech_news">技术社区 & 新闻</option>
+                        <option value="ai_model">AI 模型更新</option>
+                        <option value="ai_dataset">AI 数据集更新</option>
+                        <option value="cyber">网络安全威胁</option>
+                        <option value="infra">基础设施状态</option>
+                      </select>
+                    </div>
+                  )}
+                  {activeTab === 'academic' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
+                      <select
+                        value={academicSubCategory}
+                        onChange={(e) => setAcademicSubCategory(e.target.value)}
+                        style={{
+                          background: '#1a1a1a',
+                          color: '#fff',
+                          border: '1px solid #333',
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 2,
+                          cursor: 'pointer',
+                          outline: 'none'
+                        }}
+                      >
+                        <option value="all">全部动态</option>
+                        <option value="paper">学术论文 (arXiv / HF / S2)</option>
+                        <option value="conference">学术会议</option>
+                        <option value="prediction">预测市场</option>
+                      </select>
+                    </div>
+                  )}
+                </>
+              )}
             >
               <HotPanelItems items={hotItems.length > 0 ? hotItems : []} />
             </PanelBox>

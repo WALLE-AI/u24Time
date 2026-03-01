@@ -15,8 +15,8 @@ from data_alignment.schema import (
 )
 
 
-def _now_ts() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _make_id(*parts: str) -> str:
@@ -67,11 +67,11 @@ class EconomyNormalizer:
                 source_id=sid,
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.STOCK,
+                sub_domain=None,  # Enriched by pipeline from registry config
                 title=title,
                 url=f"https://finance.yahoo.com/quote/{symbol}",
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_metadata={"economic": eco.to_dict()},
                 categories=["stock", "price"],
@@ -110,11 +110,11 @@ class EconomyNormalizer:
                 source_id=source_id,
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.STOCK,
+                sub_domain=None,  # Enriched by pipeline
                 title=title,
                 url=f"https://quote.eastmoney.com/concept/{code}.html",
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_metadata={"economic": eco.to_dict()},
                 categories=["stock", "a-share"],
@@ -126,14 +126,15 @@ class EconomyNormalizer:
     # Crypto: CoinGecko price data
     # ──────────────────────────────────────────────────────────────
     def normalize_coingecko(self, coin: dict, source_id: str = "economy.crypto.coingecko") -> Optional[CanonicalItem]:
-        """CoinGecko coins/markets item dict"""
+        """CoinGecko simple/price item dict format"""
         try:
-            symbol = str(coin.get("symbol", "")).upper()
-            name = coin.get("name", symbol)
-            price = coin.get("current_price")
-            change_pct = coin.get("price_change_percentage_24h")
-            market_cap = coin.get("market_cap")
-            volume = coin.get("total_volume")
+            coin_id = str(coin.get("coin_id") or coin.get("id") or "unknown")
+            symbol = str(coin.get("symbol") or coin_id).upper()
+            name = str(coin.get("name") or coin_id.capitalize())
+            price = coin.get("current_price") or coin.get("usd")
+            change_pct = coin.get("price_change_percentage_24h") or coin.get("usd_24h_change")
+            market_cap = coin.get("market_cap") or coin.get("usd_market_cap")
+            volume = coin.get("total_volume") or coin.get("usd_24h_vol")
 
             eco = EconomicMetadata(
                 symbol=symbol, price=price, change_pct=change_pct,
@@ -152,15 +153,15 @@ class EconomyNormalizer:
                 severity = SeverityLevel.MEDIUM
 
             return CanonicalItem(
-                item_id=_make_id(source_id, symbol),
+                item_id=_make_id(source_id, symbol, str(price)),
                 source_id=source_id,
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.CRYPTO,
+                sub_domain=None,  # Enriched by pipeline
                 title=title,
                 url=f"https://www.coingecko.com/en/coins/{coin.get('id', symbol.lower())}",
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_metadata={"economic": eco.to_dict()},
                 categories=["crypto", "price"],
@@ -190,11 +191,11 @@ class EconomyNormalizer:
                 source_id="economy.quant.fred_series",
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.QUANT,
+                sub_domain=None,  # Enriched by pipeline
                 title=f"FRED {series_id}: {title} = {value} ({date})",
                 url=f"https://fred.stlouisfed.org/series/{series_id}",
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=SeverityLevel.INFO,
                 raw_metadata={"economic": eco.to_dict(), "series_id": series_id, "date": date},
                 categories=["macro", "fred", "indicator"],
@@ -211,7 +212,7 @@ class EconomyNormalizer:
             value = int(data.get("value", 50))
             classification = data.get("value_classification", "Neutral")
             ts = data.get("timestamp")
-            published = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat() if ts else _now_ts()
+            published = datetime.fromtimestamp(int(ts), tz=timezone.utc) if ts else _now_dt()
 
             severity = SeverityLevel.INFO
             if value <= 20:
@@ -219,21 +220,21 @@ class EconomyNormalizer:
             elif value >= 80:
                 severity = SeverityLevel.MEDIUM  # Extreme Greed
 
-            eco = EconomicMetadata(symbol="FGI", price=float(value), currency="INDEX")
-
+            title = f"恐惧贪婪指数: {value} ({'极端恐惧' if value <= 20 else '极端贪婪' if value >= 80 else '中性/平衡'})"
+            
             return CanonicalItem(
-                item_id=_make_id(source_id, str(value), published[:10]),
+                item_id=_make_id(source_id, str(value), published.isoformat()),
                 source_id=source_id,
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.QUANT,
-                title=f"Crypto Fear & Greed Index: {value} — {classification}",
+                sub_domain=None,  # Enriched by pipeline
+                title=title,
                 url="https://alternative.me/crypto/fear-and-greed-index/",
                 published_at=published,
-                crawled_at=_now_ts(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
-                raw_metadata={"economic": eco.to_dict(), "fgi_value": value, "fgi_class": classification},
-                categories=["sentiment", "crypto", "fear-greed"],
+                raw_metadata={"fng": data},
+                categories=["market", "sentiment", "crypto"],
             )
         except Exception:
             return None
@@ -257,11 +258,11 @@ class EconomyNormalizer:
                 source_id=source_id,
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.QUANT,
+                sub_domain=None,  # Enriched by pipeline
                 title=f"宏观信号: {verdict} (score={score:.1f})",
                 url="https://worldmonitor.app",
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_metadata={"economic": eco.to_dict(), "signals": signals},
                 categories=["macro", "signal", "quant"],
@@ -295,11 +296,11 @@ class EconomyNormalizer:
                 source_id=source_id,
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.TRADE,
+                sub_domain=None,  # Enriched by pipeline
                 title=title,
                 url="https://timeseries.wto.org",
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_metadata={"flow": flow},
                 categories=["wto", "trade", "bilateral"],
@@ -343,11 +344,11 @@ class EconomyNormalizer:
                 source_id=source_id,
                 source_type=SourceType.MARKET,
                 domain=DomainType.ECONOMY,
-                sub_domain=SubDomainType.QUANT,
+                sub_domain=None,  # Enriched by pipeline
                 title=f"Bitcoin Hashrate: {hashrate_eh:.2f} EH/s ({change_pct:+.1f}% 30d)",
                 url="https://mempool.space/mining",
-                published_at=_now_ts(),
-                crawled_at=_now_ts(),
+                published_at=_now_dt(),
+                crawled_at=_now_dt(),
                 severity_level=severity,
                 raw_metadata={"economic": eco.to_dict(), "hashrate_30d_change_pct": change_pct},
                 categories=["bitcoin", "hashrate", "mining"],

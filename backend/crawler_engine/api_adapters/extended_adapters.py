@@ -194,6 +194,62 @@ class HuggingFaceAdapter:
             logger.info(f"HuggingFaceAdapter: 获取 {len(papers)} 篇论文")
             return papers
 
+    @retry(**_RETRY)
+    async def fetch_trending_models(self, limit: int = 20) -> list[dict]:
+        """获取 HF 热门模型"""
+        url = "https://huggingface.co/api/models"
+        params = {"sort": "trending", "limit": limit, "direction": "-1"}
+        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, headers=HEADERS) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            return resp.json()
+
+    @retry(**_RETRY)
+    async def fetch_trending_datasets(self, limit: int = 20) -> list[dict]:
+        """获取 HF 热门数据集"""
+        url = "https://huggingface.co/api/datasets"
+        params = {"sort": "trending", "limit": limit, "direction": "-1"}
+        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, headers=HEADERS) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            return resp.json()
+
+
+# ══════════════════════════════════════════════════════════════
+# ModelScopeAdapter — 1小时 TTL
+# ══════════════════════════════════════════════════════════════
+
+class ModelScopeAdapter:
+    """
+    ModelScope API 适配器 (魔搭社区)。
+    虽然 ModelScope API 文档不够公开，但可以通过公开 API 抓取。
+    """
+
+    BASE_URL = "https://modelscope.cn/api/v1"
+
+    @retry(**_RETRY)
+    async def fetch_models(self, limit: int = 20) -> list[dict]:
+        """获取 ModelScope 热门模型"""
+        url = f"{self.BASE_URL}/models"
+        # 模拟常用的热门筛选
+        params = {"page_size": limit, "page_number": 1, "sort": "vview_count"}
+        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, headers=HEADERS) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("Data", {}).get("Models", [])
+
+    @retry(**_RETRY)
+    async def fetch_datasets(self, limit: int = 20) -> list[dict]:
+        """获取 ModelScope 热门数据集"""
+        url = f"{self.BASE_URL}/datasets"
+        params = {"page_size": limit, "page_number": 1, "sort": "vview_count"}
+        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, headers=HEADERS) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("Data", {}).get("Datasets", [])
+
 
 # ══════════════════════════════════════════════════════════════
 # CloudStatusAdapter  — 5分钟 TTL

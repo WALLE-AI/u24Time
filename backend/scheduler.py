@@ -38,7 +38,7 @@ except ImportError:
 # 调度分层配置（WorldMonitor TTL 策略）
 # ──────────────────────────────────────────────────────────────
 
-REALTIME_INTERVAL_MIN  = 5    # 价格/飞行/服务状态
+REALTIME_INTERVAL_MIN  = 1    # 价格/飞行/服务状态
 NEWS_INTERVAL_MIN      = 15   # 新闻/热搜
 EVENT_INTERVAL_MIN     = 30   # 冲突/CVE/火点/算力
 MACRO_INTERVAL_MIN     = 60   # 宏观指标/论文/恐惧贪婪
@@ -65,6 +65,10 @@ SOURCE_SCHEDULE: dict[str, int] = {
     "tech.ai.openai_status":              REALTIME_INTERVAL_MIN,
     "tech.ai.anthropic_status":           REALTIME_INTERVAL_MIN,
     "tech.ai.replicate_status":           REALTIME_INTERVAL_MIN,
+    "tech.ai.hf_models":                  NEWS_INTERVAL_MIN,  # 15 min by default, but user wants 5 min for tech section refresh?
+    "tech.ai.hf_datasets":                NEWS_INTERVAL_MIN,
+    "tech.ai.ms_models":                  NEWS_INTERVAL_MIN,
+    "tech.ai.ms_datasets":                NEWS_INTERVAL_MIN,
 
     # ── 新闻/热搜 (15分钟) ─────────────────────────────────────
     "global.social.weibo_newsnow":        NEWS_INTERVAL_MIN,
@@ -92,11 +96,11 @@ SOURCE_SCHEDULE: dict[str, int] = {
     "tech.cyber.nvd_cve":                 EVENT_INTERVAL_MIN,
     "tech.cyber.feodo":                   EVENT_INTERVAL_MIN,
     "tech.cyber.urlhaus":                 EVENT_INTERVAL_MIN,
-    "economy.quant.mempool_hashrate":     EVENT_INTERVAL_MIN,
+    "economy.quant.mempool_hashrate":     REALTIME_INTERVAL_MIN,
     "academic.prediction.polymarket":     EVENT_INTERVAL_MIN,
 
     # ── 宏观指标/论文 (60分钟) ─────────────────────────────────
-    "economy.quant.fear_greed_index":     MACRO_INTERVAL_MIN,
+    "economy.quant.fear_greed_index":     REALTIME_INTERVAL_MIN,
     "economy.quant.fred_series":          MACRO_INTERVAL_MIN,
     "economy.quant.macro_signals":        MACRO_INTERVAL_MIN,
     "economy.quant.bis_policy_rates":     MACRO_INTERVAL_MIN,
@@ -326,11 +330,34 @@ class DataScheduler:
 
         # ── HuggingFace Daily Papers ──────────────────────────
         if source_id == "academic.huggingface.papers":
-            async def _do_hf():
+            async def _do_hf_papers():
                 adapter = HuggingFaceAdapter()
                 rows = await adapter.fetch()
                 return await pipeline.align_and_save(source_id, rows, db_session=db_session)
-            return await self._engine.run_custom_adapter(source_id, _do_hf, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_hf_papers, db_session=db_session)
+
+        # ── HuggingFace Trending Models/Datasets ──────────────
+        if source_id in ("tech.ai.hf_models", "tech.ai.hf_datasets"):
+            async def _do_hf_trending():
+                adapter = HuggingFaceAdapter()
+                if "models" in source_id:
+                    rows = await adapter.fetch_trending_models()
+                else:
+                    rows = await adapter.fetch_trending_datasets()
+                # Use tech_normalizer via pipeline
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_hf_trending, db_session=db_session)
+
+        # ── ModelScope Trending Models/Datasets ───────────────
+        if source_id in ("tech.ai.ms_models", "tech.ai.ms_datasets"):
+            async def _do_ms_trending():
+                adapter = ModelScopeAdapter()
+                if "models" in source_id:
+                    rows = await adapter.fetch_models()
+                else:
+                    rows = await adapter.fetch_datasets()
+                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
+            return await self._engine.run_custom_adapter(source_id, _do_ms_trending, db_session=db_session)
 
         # ── Semantic Scholar Trending ────────────────────────
         if source_id == "academic.semantic_scholar.trending":
@@ -377,35 +404,35 @@ class DataScheduler:
             # Adapter not yet implemented
             return []
 
-        # ── 加密货币 (CoinGecko，复用 engine) ─────────────────
+        # ── 加密货币 (CoinGecko) ───────────────────────────────
         if source_id == "economy.crypto.coingecko":
-            return await self._engine.run_api("market.coingecko", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
 
         # ── USGS 地震 ─────────────────────────────────────────
         if source_id in ("global.disaster.usgs", "global.disaster.earthquakes_wm"):
-            return await self._engine.run_api("geo.usgs", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
 
         # ── GDELT 全球事件 ────────────────────────────────────
         if source_id == "global.conflict.gdelt":
-            return await self._engine.run_api("geo.gdelt", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
 
         # ── ACLED 冲突 ────────────────────────────────────────
         if source_id in ("global.conflict.acled", "global.unrest.acled_protests"):
-            return await self._engine.run_api("geo.acled", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
 
         # ── NASA 野火 ─────────────────────────────────────────
         if source_id == "global.disaster.nasa_firms":
-            return await self._engine.run_api("geo.nasa_firms", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
 
         # ── OpenSky ADS-B ─────────────────────────────────────
         if source_id == "global.military.opensky":
-            return await self._engine.run_api("military.opensky", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
 
         # ── Cyber threats ─────────────────────────────────────
         if source_id == "tech.cyber.feodo":
-            return await self._engine.run_api("cyber.feodo", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
         if source_id == "tech.cyber.urlhaus":
-            return await self._engine.run_api("cyber.urlhaus", db_session=db_session)
+            return await self._engine.run_api(source_id, db_session=db_session)
 
         # ── NewsNow 热搜系列 ──────────────────────────────────
         _NEWSNOW_SOURCES = {

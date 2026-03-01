@@ -195,33 +195,33 @@ class CrawlerEngine:
         meta: dict = {}
 
         try:
-            if source_id == "geo.acled":
+            if source_id in ("geo.acled", "global.conflict.acled"):
                 if not self._acled:
                     self._acled = ACLEDAdapter()
                 raw_data = await self._acled.fetch_recent(**kwargs)
 
-            elif source_id == "geo.gdelt":
+            elif source_id in ("geo.gdelt", "global.conflict.gdelt"):
                 if not self._gdelt:
                     self._gdelt = GDELTAdapter()
                 raw_data = await self._gdelt.fetch_latest_events()
 
-            elif source_id == "geo.usgs":
+            elif source_id in ("geo.usgs", "global.disaster.usgs"):
                 if not self._usgs:
                     self._usgs = USGSAdapter()
                 raw_data = await self._usgs.fetch_recent(**kwargs)
 
-            elif source_id == "geo.nasa_firms":
+            elif source_id in ("geo.nasa_firms", "global.disaster.nasa_firms"):
                 if not self._nasa:
                     self._nasa = NASAFIRMSAdapter()
                 raw_data = await self._nasa.fetch_active_fires(**kwargs)
 
-            elif source_id == "military.opensky":
+            elif source_id in ("military.opensky", "global.military.opensky"):
                 if not self._opensky:
                     self._opensky = OpenSkyAdapter()
                 states = await self._opensky.fetch_all_states(**kwargs)
                 raw_data = states  # list[list] → pipeline handles it
 
-            elif source_id == "market.coingecko":
+            elif source_id in ("market.coingecko", "economy.crypto.coingecko"):
                 if not self._coingecko:
                     self._coingecko = CoinGeckoAdapter()
                 coin_ids = kwargs.get("coin_ids")
@@ -230,28 +230,69 @@ class CrawlerEngine:
                 raw_data = [{"coin_id": cid, **price_data} for cid, price_data in prices.items()]
                 meta = {"multi_coin": True}
 
-            elif source_id == "cyber.feodo":
+            elif source_id in ("cyber.feodo", "tech.cyber.feodo"):
                 if not self._feodo:
                     self._feodo = FeodoAdapter()
                 raw_data = await self._feodo.fetch_c2_list()
 
-            elif source_id == "cyber.urlhaus":
+            elif source_id in ("cyber.urlhaus", "tech.cyber.urlhaus"):
                 if not self._urlhaus:
                     self._urlhaus = URLhausAdapter()
                 raw_data = await self._urlhaus.fetch_recent(**kwargs)
+
+            # --- Extended Economy Sources ---
+            elif source_id in ("economy.stock.country_index", "economy.stock.sector_summary", "economy.stock.yfinance_us"):
+                from crawler_engine.api_adapters.extended_adapters import YahooFinanceAdapter
+                adapter = YahooFinanceAdapter()
+                symbols = kwargs.get("symbols")
+                raw_data = await adapter.fetch_indices(symbols)
+                meta = {"multi_item": True, "yahoo_chart": True}
+
+            elif source_id == "economy.futures.commodity_quotes":
+                from crawler_engine.api_adapters.extended_adapters import YahooFinanceAdapter
+                adapter = YahooFinanceAdapter()
+                raw_data = await adapter.fetch_commodities()
+                meta = {"multi_item": True, "yahoo_chart": True}
+
+            elif source_id == "economy.quant.fear_greed_index":
+                from crawler_engine.api_adapters.extended_adapters import FearGreedAdapter
+                adapter = FearGreedAdapter()
+                raw_data = await adapter.fetch(limit=1)
+                meta = {"multi_item": True}
+
+            elif source_id == "economy.quant.mempool_hashrate":
+                from crawler_engine.api_adapters.extended_adapters import BtcHashrateAdapter
+                adapter = BtcHashrateAdapter()
+                data = await adapter.fetch()
+                raw_data = data.get("hashrates", [])
+                meta = {"multi_item": True}
 
             else:
                 logger.warning(f"CrawlerEngine: 未知 source_id={source_id}")
 
             task.items_fetched = len(raw_data)
 
-            # 特殊处理 coingecko — 每个币种分别对齐
-            if source_id == "market.coingecko" and meta.get("multi_coin"):
+            # 特殊处理 coingecko/yahoo — 每个项分别对齐
+            if source_id in ("market.coingecko", "economy.crypto.coingecko") and meta.get("multi_coin"):
                 all_items: list[CanonicalItem] = []
                 for row in raw_data:
                     coin_id = row.pop("coin_id", "unknown")
                     items = await self._pipeline.align_and_save(source_id, [row], meta={"coin_id": coin_id}, db_session=db_session)
                     all_items.extend(items)
+            
+            elif meta.get("yahoo_chart") and meta.get("multi_item"):
+                all_items: list[CanonicalItem] = []
+                for row in raw_data:
+                    symbol = row.pop("symbol", "unknown")
+                    items = await self._pipeline.align_and_save(source_id, [row], meta={"symbol": symbol}, db_session=db_session)
+                    all_items.extend(items)
+
+            elif meta.get("multi_item"):
+                all_items: list[CanonicalItem] = []
+                for row in raw_data:
+                    items = await self._pipeline.align_and_save(source_id, [row], meta=meta, db_session=db_session)
+                    all_items.extend(items)
+
             else:
                 all_items = await self._pipeline.align_and_save(source_id, raw_data, meta, db_session=db_session)
 
