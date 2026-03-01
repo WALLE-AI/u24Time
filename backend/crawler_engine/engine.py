@@ -240,7 +240,6 @@ class CrawlerEngine:
                     self._urlhaus = URLhausAdapter()
                 raw_data = await self._urlhaus.fetch_recent(**kwargs)
 
-            # --- Extended Economy Sources ---
             elif source_id in ("economy.stock.country_index", "economy.stock.sector_summary", "economy.stock.yfinance_us"):
                 from crawler_engine.api_adapters.extended_adapters import YahooFinanceAdapter
                 adapter = YahooFinanceAdapter()
@@ -265,6 +264,18 @@ class CrawlerEngine:
                 adapter = BtcHashrateAdapter()
                 data = await adapter.fetch()
                 raw_data = data.get("hashrates", [])
+                meta = {"multi_item": True}
+
+            elif source_id == "academic.huggingface.papers":
+                from crawler_engine.api_adapters.extended_adapters import HuggingFaceAdapter
+                adapter = HuggingFaceAdapter()
+                raw_data = await adapter.fetch(limit=30)
+                meta = {"multi_item": True}
+                
+            elif source_id == "academic.semantic_scholar.trending":
+                from crawler_engine.api_adapters.extended_adapters import SemanticScholarAdapter
+                adapter = SemanticScholarAdapter()
+                raw_data = await adapter.fetch_trending(query="AI", limit=30)
                 meta = {"multi_item": True}
 
             else:
