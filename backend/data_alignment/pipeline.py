@@ -393,6 +393,54 @@ class AlignmentPipeline:
                     logger.info(f"AlignmentPipeline: {len(items)} 条已存在，跳过写入 source={source_id}")
                     return items
 
+                # === LLM Batch Classification ===
+                try:
+                    from utils.llm_client import LLMClient
+                    llm = LLMClient()
+                    if llm.api_key:
+                        # 仅对以下情况进行 LLM 领域重分类：
+                        # 1. domain 为空 — 来源不明
+                        # 2. domain == "global" 且来源是 global.social.*/global.diplomacy.* — 可能混合各域内容
+                        # 排除：tech.oss.*/economy.stock.* 等已有明确 domain 的热搜源，防止 LLM 错误覆盖
+                        _NEEDS_LLM_PREFIXES = ("global.social.", "global.diplomacy.")
+                        items_to_classify = [
+                            item for item in new_items
+                            if not item.domain
+                            or (
+                                item.domain == "global"
+                                and any(item.source_id.startswith(p) for p in _NEEDS_LLM_PREFIXES)
+                            )
+                        ]
+                        
+                        if items_to_classify:
+                            BATCH_SIZE = 20
+                            for i in range(0, len(items_to_classify), BATCH_SIZE):
+                                batch = items_to_classify[i:i+BATCH_SIZE]
+                                items_data = [
+                                    {
+                                        "id": item.item_id, 
+                                        "title": item.title, 
+                                        "body": item.body or item.title
+                                    }
+                                    for item in batch
+                                ]
+                                
+                                classification_results = await llm.classify_items_batch(items_data)
+                                
+                                for item in batch:
+                                    if item.item_id in classification_results:
+                                        res = classification_results[item.item_id]
+                                        item.domain = res["domain"]
+                                        if res["sub_domain"]:
+                                            item.sub_domain = res["sub_domain"]
+                                        item.is_classified = True
+                                        item.classification_source = "llm"
+                                        
+                            logger.info(f"AlignmentPipeline: 完成 {len(items_to_classify)} 条目的 LLM 领域分类 source={source_id}")
+                except Exception as e:
+                    logger.error(f"AlignmentPipeline: LLM 分类过程异常 source={source_id} err={e}")
+                # ================================
+
                 for item in new_items:
                     model = CanonicalItemModel(
                         item_id=item.item_id,

@@ -13,12 +13,17 @@ from db.models import Base
 
 
 # ─── Sync Engine (for Alembic + simple ops) ──────────────────
+sync_engine_args = {"echo": settings.DB_ECHO}
+if settings.DB_TYPE != "sqlite":
+    sync_engine_args.update({
+        "pool_pre_ping": True,
+        "pool_size": 20,
+        "max_overflow": 20,
+    })
+
 sync_engine = create_engine(
     settings.database_url,
-    echo=settings.DB_ECHO,
-    pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=20,
+    **sync_engine_args
 )
 
 SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
@@ -38,12 +43,17 @@ def get_sync_session() -> Session:
 
 
 # ─── Async Engine (for application runtime) ──────────────────
+async_engine_args = {"echo": settings.DB_ECHO}
+if settings.DB_TYPE != "sqlite":
+    async_engine_args.update({
+        "pool_pre_ping": True,
+        "pool_size": 20,
+        "max_overflow": 20,
+    })
+
 async_engine = create_async_engine(
     settings.async_database_url,
-    echo=settings.DB_ECHO,
-    pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=20,
+    **async_engine_args
 )
 
 AsyncSessionFactory = async_sessionmaker(

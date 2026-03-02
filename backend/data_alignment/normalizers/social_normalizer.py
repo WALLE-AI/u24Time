@@ -23,6 +23,7 @@ from data_alignment.schema import (
     SourceType,
     SeverityLevel,
     classify_severity_by_keywords,
+    classify_domain_by_keywords,
 )
 
 
@@ -211,6 +212,9 @@ class SocialNormalizer:
             is_classified=True,
             classification_source=cls_src,
         )
+
+        item.domain, item.sub_domain = classify_domain_by_keywords(title)
+        return item
 
     def normalize_batch(self, rows: list[dict], platform: str) -> list[CanonicalItem]:
         results = []

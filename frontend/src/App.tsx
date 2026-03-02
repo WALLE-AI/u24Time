@@ -46,6 +46,7 @@ const DOMAIN_TABS = [
   { id: 'economy', label: '经济', icon: DollarSign },
   { id: 'technology', label: '技术', icon: Cpu },
   { id: 'academic', label: '学术', icon: BookOpen },
+  { id: 'entertainment', label: '娱乐', icon: Sparkles },
 ];
 
 const DOMAIN_STATS_FALLBACK: StatItem[] = [
@@ -62,9 +63,22 @@ function now() {
   return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function formatTime(isoString?: string) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return '刚刚';
+  if (mins < 60) return `${mins}分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
 function domainColor(d: string) {
   const map: Record<string, string> = {
-    'global': '#ff5c00', 'economy': '#3357FF', 'technology': '#33FF57', 'academic': '#c084fc'
+    'global': '#ff5c00', 'economy': '#3357FF', 'technology': '#33FF57', 'academic': '#c084fc', 'entertainment': '#ff007f'
   };
   return map[d] ?? '#6b7280';
 }
@@ -96,6 +110,64 @@ function SourceBadge({ status }: { status: string }) {
 }
 
 // ─────────────────────────────────────  Panels
+function NewsFlashPanel({ items, lastRefreshed }: { items: any[], lastRefreshed: Date | null }) {
+  return (
+    <PanelBox
+      title="今日时讯快报"
+      icon={<Zap size={14} color="#ffaa00" />}
+      badge="最新推送"
+      badgeColor="#ffaa00"
+      titleRight={
+        <div style={{ fontSize: 10, color: '#555', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Clock size={10} />
+          {lastRefreshed ? `已于 ${lastRefreshed.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 更新` : '正在同步...'}
+        </div>
+      }
+      style={{ marginBottom: 0 }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {items.map((item, idx) => (
+          <a
+            key={item.item_id || idx}
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              padding: '12px 0',
+              borderBottom: idx === items.length - 1 ? 'none' : '1px solid #1a1a1a',
+              textDecoration: 'none',
+              color: 'inherit',
+              transition: 'background 0.2s',
+              cursor: item.url ? 'pointer' : 'default'
+            }}
+            onMouseEnter={(e) => { if (item.url) e.currentTarget.style.background = 'rgba(255,170,0,0.03)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <div style={{ marginTop: 5 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ffaa00', boxShadow: '0 0 8px rgba(255,170,0,0.6)' }} />
+            </div>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.5, color: '#eee' }}>{item.title}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, color: '#ffaa00', fontWeight: 700, fontFamily: 'monospace' }}>{formatTime(item.published_at || item.crawled_at)}</span>
+                <span style={{ fontSize: 10, color: '#444' }}>|</span>
+                <span style={{ fontSize: 11, color: '#666', fontWeight: 500 }}>{item.source_id}</span>
+                {item.domain && (
+                  <span style={{ fontSize: 10, color: domainColor(item.domain), opacity: 0.8 }}>#{item.domain}</span>
+                )}
+              </div>
+            </div>
+          </a>
+        ))}
+        {items.length === 0 && <div style={{ padding: '30px 0', color: '#555', textAlign: 'center', fontSize: 13 }}>正在载入最新时讯...</div>}
+      </div>
+    </PanelBox>
+  );
+}
+
 function StatBar({ stats }: { stats: StatItem[] }) {
   return (
     <div style={{ display: 'flex', gap: 12, padding: '0 0 16px' }}>
@@ -141,20 +213,23 @@ function HotPanelItems({ items }: { items: any[] }) {
           </span>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{item.title}</span>
-            {item.raw_domain === 'academic' && (
-              <div style={{ display: 'flex', gap: 6 }}>
-                {item.categories && item.categories.length > 0 && item.categories.slice(0, 2).map((c: string, idx: number) => (
-                  <span key={c + idx} style={{ padding: '1px 5px', background: 'rgba(192, 132, 252, 0.1)', color: '#c084fc', borderRadius: 3, fontSize: 9, border: '1px solid rgba(192, 132, 252, 0.3)' }}>
-                    {c}
-                  </span>
-                ))}
-                {item.sub_domain && (
-                  <span style={{ padding: '1px 5px', background: 'rgba(52, 211, 153, 0.1)', color: '#34d399', borderRadius: 3, fontSize: 9, border: '1px solid rgba(52, 211, 153, 0.3)' }}>
-                    {item.sub_domain === 'paper' ? '论文' : item.sub_domain}
-                  </span>
-                )}
-              </div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 10, color: '#666', fontWeight: 500 }}>{formatTime(item.published_at || item.crawled_at)}</span>
+              {item.raw_domain === 'academic' && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {item.categories && item.categories.length > 0 && item.categories.slice(0, 2).map((c: string, idx: number) => (
+                    <span key={c + idx} style={{ padding: '1px 5px', background: 'rgba(192, 132, 252, 0.1)', color: '#c084fc', borderRadius: 3, fontSize: 9, border: '1px solid rgba(192, 132, 252, 0.3)' }}>
+                      {c}
+                    </span>
+                  ))}
+                  {item.sub_domain && (
+                    <span style={{ padding: '1px 5px', background: 'rgba(52, 211, 153, 0.1)', color: '#34d399', borderRadius: 3, fontSize: 9, border: '1px solid rgba(52, 211, 153, 0.3)' }}>
+                      {item.sub_domain === 'paper' ? '论文' : item.sub_domain}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           <span style={{ fontSize: 11, color: domainColor(item.raw_domain), fontWeight: 700, minWidth: 32 }}>{item.domain}</span>
           <HeatBar value={item.heat} />
@@ -201,9 +276,10 @@ interface PanelBoxProps {
   children: React.ReactNode;
   style?: React.CSSProperties;
   actions?: React.ReactNode;
+  titleRight?: React.ReactNode;
 }
 
-function PanelBox({ title, icon, badge, badgeColor = '#34d399', count, children, style, actions }: PanelBoxProps) {
+function PanelBox({ title, icon, badge, badgeColor = '#34d399', count, children, style, actions, titleRight }: PanelBoxProps) {
   return (
     <div style={{ background: '#0c0c0c', border: '2px solid #222', display: 'flex', flexDirection: 'column', ...style }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '2px solid #222', background: '#111' }}>
@@ -217,6 +293,8 @@ function PanelBox({ title, icon, badge, badgeColor = '#34d399', count, children,
         {count !== undefined && (
           <span style={{ fontSize: 12, color: '#666', fontWeight: 700 }}>{count}</span>
         )}
+        <div style={{ flex: 1 }} />
+        {titleRight}
         {actions}
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '0 14px 12px' }}>
@@ -394,9 +472,11 @@ export default function App() {
   const [economySubCategory, setEconomySubCategory] = useState('all');
   const [techSubCategory, setTechSubCategory] = useState('all');
   const [academicSubCategory, setAcademicSubCategory] = useState('all');
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   // Real dynamic states
   const [hotItems, setHotItems] = useState<any[]>([]);
+  const [newsFlashItems, setNewsFlashItems] = useState<any[]>([]);
   const [domainStats, setDomainStats] = useState<StatItem[]>([]);
   const [sources, setSources] = useState<any[]>([]);
 
@@ -408,13 +488,14 @@ export default function App() {
     economy: [0, 0, 0, 0, 0, 0, 0, 0],
     technology: [0, 0, 0, 0, 0, 0, 0, 0],
     academic: [0, 0, 0, 0, 0, 0, 0, 0],
+    entertainment: [0, 0, 0, 0, 0, 0, 0, 0],
   });
   const [domainLastUpdated, setDomainLastUpdated] = useState<Record<string, string | null>>({
-    global: null, economy: null, technology: null, academic: null,
+    global: null, economy: null, technology: null, academic: null, entertainment: null,
   });
   // 地区分布：每个域对应 { CN: n, US: n, Global: n, Other: n }
   const [domainGeoDistribution, setDomainGeoDistribution] = useState<Record<string, Record<string, number>>>({
-    global: {}, economy: {}, technology: {}, academic: {},
+    global: {}, economy: {}, technology: {}, academic: {}, entertainment: {},
   });
 
   // Task Center states
@@ -535,7 +616,8 @@ export default function App() {
             'global': '全球',
             'economy': '经济',
             'technology': '技术',
-            'academic': '学术'
+            'academic': '学术',
+            'entertainment': '娱乐'
           };
           return {
             rank: idx + 1,
@@ -545,14 +627,40 @@ export default function App() {
             raw_domain: item.domain,
             sub_domain: item.sub_domain,
             categories: item.categories || [],
-            heat: item.hotness_score || 0
+            heat: item.hotness_score || 0,
+            published_at: item.published_at,
+            crawled_at: item.crawled_at
           };
         }));
+      }
+
+      // Fetch News Flash (latest 8 items)
+      const flashUrl = new URL(`${API_BASE}/api/v1/items`);
+      flashUrl.searchParams.append('limit', '8');
+      flashUrl.searchParams.append('sort', 'time');
+      flashUrl.searchParams.append('last_24h', 'true');
+      if (domain && domain !== 'all') {
+        flashUrl.searchParams.append('domain', domain);
+      }
+      const respFlash = await fetch(flashUrl.toString());
+      const dataFlash = await respFlash.json();
+      if (dataFlash.success) {
+        setNewsFlashItems(dataFlash.data);
+        setLastRefreshed(new Date());
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     }
   };
+
+  // 1-minute auto-refresh for News Flash and Rankings
+  useEffect(() => {
+    const timer = setInterval(() => {
+      addLog({ level: 'INFO', domain: 'SYS', msg: '实时同步：正在刷新今日时讯与热搜排行' });
+      fetchData(activeTab);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [activeTab, addLog]);
 
   const fetchSummary = async (domain?: string, force = false) => {
     const cacheKey = `u24_ai_summary_${domain || 'all'}`;
@@ -794,6 +902,8 @@ export default function App() {
           />
 
           <StatBar stats={domainStats.length > 0 ? domainStats : DOMAIN_STATS_FALLBACK} />
+
+          <NewsFlashPanel items={newsFlashItems} lastRefreshed={lastRefreshed} />
 
           {/* Main content grid - Now single column for focus */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

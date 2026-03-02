@@ -140,3 +140,99 @@ class LLMClient:
             
         lines.append("\n(注：请在后端配置 LLM_API_KEY 以通过 Qwen/GPT 获取真实的 AI 深度分析)")
         return "\n".join(lines)
+
+    async def classify_items_batch(self, items_data: list[dict]) -> dict:
+        """
+        批量分类数据条目所属领域。
+        items_data: [{"id": "item1", "title": "...", "body": "..."}, ...]
+        返回: {"item1": {"domain": "economy", "sub_domain": "crypto"}, ...}
+        """
+        if not self.api_key or not items_data:
+            return {}
+
+        prompt_data = []
+        for item in items_data:
+            text = f"Title: {item.get('title', '')}\nBody: {str(item.get('body', ''))[:500]}"
+            prompt_data.append({"id": item["id"], "text": text})
+
+        prompt = (
+            "You are an expert intelligence classifier. Classify each of the following items into one of the five main domains: "
+            "`global`, `economy`, `technology`, `academic`, or `entertainment`.\n"
+            "Also, assign a short `sub_domain` (1-2 words, lowercase) that best describes the specific topic (e.g., ai, crypto, disaster, stock, military, policy, celebrity, movie, sports).\n"
+            "Respond strictly with valid JSON in the following format:\n"
+            "{\n"
+            '  "item_id_1": {"domain": "technology", "sub_domain": "ai"},\n'
+            '  "item_id_2": {"domain": "economy", "sub_domain": "stock"}\n'
+            "}\n"
+            "Here are the items to classify:\n"
+            f"{json.dumps(prompt_data, ensure_ascii=False, indent=2)}\n"
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                payload = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "You are a precise data classification system. You must output only valid JSON. Do not include markdown code block markers in your response, just the raw JSON object."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 1500,
+                }
+                
+                # Check if it's OpenAI to add response_format
+                if "openai" in self.base_url or "api.openai.com" in self.base_url:
+                    payload["response_format"] = {"type": "json_object"}
+
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload
+                )
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"].strip()
+                
+                # Clean up markdown JSON block if present
+                if content.startswith("```json"):
+                    content = content[7:]
+                if content.startswith("```"):
+                    content = content[3:]
+                if content.endswith("```"):
+                    content = content[:-3]
+                content = content.strip()
+
+                result = json.loads(content)
+                
+                # Sanity check the domains
+                valid_domains = {"global", "economy", "technology", "academic", "entertainment"}
+                final_result = {}
+                for k, v in result.items():
+                    domain = str(v.get("domain", "")).lower()
+                    if domain in valid_domains:
+                        final_result[k] = {
+                            "domain": domain,
+                            "sub_domain": str(v.get("sub_domain", "")).lower()[:64]
+                        }
+                    else:
+                        # Fallback mapping if LLM returns something weird
+                        if domain == "tech": domain = "technology"
+                        elif domain == "finance": domain = "economy"
+                        elif domain == "science": domain = "academic"
+                        elif domain == "politics": domain = "global"
+                        
+                        if domain in valid_domains:
+                            final_result[k] = {
+                                "domain": domain,
+                                "sub_domain": str(v.get("sub_domain", "")).lower()[:64]
+                            }
+
+                return final_result
+
+        except Exception as e:
+            logger.error(f"LLMClient: 批量分类失败: {e}")
+            return {}
+

@@ -34,6 +34,8 @@ from data_alignment.schema import (
     SeverityLevel,
     HotnessCalculator,
     classify_severity_by_keywords,
+    classify_domain_by_keywords,
+    DomainType,
 )
 
 
@@ -48,9 +50,9 @@ NEWSNOW_META: dict[str, dict] = {
     "economy.stock.wallstreetcn":     {"platform": "wallstreetcn","category": "finance",   "geo": "CN"},
     "economy.stock.cls_hot":          {"platform": "cls",         "category": "finance",   "geo": "CN"},
     "economy.stock.xueqiu":           {"platform": "xueqiu",      "category": "finance",   "geo": "CN"},
-    "tech.oss.github_trending":       {"platform": "github",      "category": "tech",      "geo": None},
-    "tech.oss.coolapk":               {"platform": "coolapk",     "category": "android",   "geo": "CN"},
-    "tech.oss.toutiao_tech":          {"platform": "toutiao",     "category": "news",      "geo": "CN"},
+    "tech.oss.github_trending":       {"platform": "github",      "category": "tech",      "geo": None,  "domain": "technology", "sub_domain": "oss"},
+    "tech.oss.coolapk":               {"platform": "coolapk",     "category": "android",   "geo": "CN",  "domain": "technology", "sub_domain": "tech_news"},
+    "tech.oss.toutiao_tech":          {"platform": "toutiao",     "category": "news",      "geo": "CN",  "domain": "technology", "sub_domain": "tech_news"},
 }
 
 # 财经源使用金融严重度补充规则
@@ -160,11 +162,17 @@ class HotSearchNormalizer:
             else:
                 published_at = datetime.now(timezone.utc)
 
-            # 分类标签
-            category = meta.get("category", "hotsearch")
-            categories = ["hotsearch", category]
+            categories: list[str] = []
             if source_id in FINANCE_SOURCES:
                 categories.append("finance")
+
+
+            # 自动分类领域 (Entertainment 归位)
+            domain, sub_domain = classify_domain_by_keywords(title)
+            if not domain:
+                # Fallback to current categories/meta
+                domain = meta.get("domain") or ""
+                sub_domain = meta.get("sub_domain") or ""
 
             return CanonicalItem(
                 item_id=item_id,
@@ -176,6 +184,8 @@ class HotSearchNormalizer:
                 published_at=published_at,
                 hotness_score=round(hotness_score, 2),
                 severity_level=severity,
+                domain=domain,
+                sub_domain=sub_domain,
                 categories=categories,
                 geo_country=meta.get("geo"),
                 raw_engagement={"rank": rank, "raw_hotness": raw_hotness},

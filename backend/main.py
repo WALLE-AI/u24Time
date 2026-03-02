@@ -399,13 +399,34 @@ def list_items():
         source_id = request.args.get("source_id")
         domain = request.args.get("domain")
         severity = request.args.get("severity")
+        sort = request.args.get("sort", "hotness") # Default to hotness
+        last_24h = request.args.get("last_24h", "false").lower() == "true"
         page = max(1, int(request.args.get("page", 1)))
         limit = min(200, max(1, int(request.args.get("limit", 50))))
 
         with get_sync_session() as session:
-            stmt = select(CanonicalItemModel).order_by(desc(CanonicalItemModel.hotness_score))
+            # Determine base statement
+            stmt = select(CanonicalItemModel)
+
+            # Filtering by the last 24 hours (rolling window)
+            if last_24h:
+                from datetime import datetime, timezone, timedelta
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+                stmt = stmt.where(CanonicalItemModel.crawled_at >= cutoff)
+
+            # Determine order_by based on sort parameter
+            if sort == "time":
+                stmt = stmt.order_by(desc(CanonicalItemModel.crawled_at))
+            else:
+                stmt = stmt.order_by(desc(CanonicalItemModel.hotness_score), desc(CanonicalItemModel.crawled_at))
+
             if domain and domain != "all":
                 stmt = stmt.where(CanonicalItemModel.domain == domain)
+                
+                # 强制保护学术域：仅允许真正来源于 academic.* 的数据
+                if domain == "academic":
+                    stmt = stmt.where(CanonicalItemModel.source_id.startswith("academic."))
+                    
             if source_type:
                 stmt = stmt.where(CanonicalItemModel.source_type == source_type)
             if source_id:
@@ -423,6 +444,11 @@ def list_items():
             stmt = stmt.offset((page - 1) * limit).limit(limit)
             rows = session.scalars(stmt).all()
 
+        def _format_db_dt(dt):
+            if not dt: return None
+            from datetime import timezone
+            return dt.replace(tzinfo=timezone.utc).isoformat() if dt.tzinfo is None else dt.isoformat()
+
         items = [
             {
                 "item_id": r.item_id,
@@ -430,7 +456,7 @@ def list_items():
                 "source_type": r.source_type,
                 "title": r.title,
                 "url": r.url,
-                "published_at": r.published_at.isoformat() if r.published_at else None,
+                "published_at": _format_db_dt(r.published_at),
                 "hotness_score": r.hotness_score,
                 "severity_level": r.severity_level,
                 "geo_lat": r.geo_lat,
@@ -439,6 +465,7 @@ def list_items():
                 "categories": r.categories,
                 "domain": r.domain,
                 "sub_domain": r.sub_domain,
+                "crawled_at": _format_db_dt(r.crawled_at),
             }
             for r in rows
         ]
@@ -627,7 +654,7 @@ def domain_activity():
             if domain not in domain_last_updated or iso > domain_last_updated[domain]:
                 domain_last_updated[domain] = iso
 
-        domains = ["global", "economy", "technology", "academic"]
+        domains = ["global", "economy", "technology", "academic", "entertainment"]
         result = [
             {
                 "domain": d,

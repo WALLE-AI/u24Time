@@ -74,6 +74,11 @@ class CanonicalItemModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     def to_dict(self):
+        def _iso(dt):
+            if not dt: return None
+            # datetime and timezone are already imported at the top of models.py
+            return dt.replace(tzinfo=timezone.utc).isoformat() if dt.tzinfo is None else dt.isoformat()
+
         return {
             "id": self.id,
             "item_id": self.item_id,
@@ -83,8 +88,8 @@ class CanonicalItemModel(Base):
             "body": self.body,
             "author": self.author,
             "url": self.url,
-            "published_at": self.published_at.isoformat() if self.published_at else None,
-            "crawled_at": self.crawled_at.isoformat(),
+            "published_at": _iso(self.published_at),
+            "crawled_at": _iso(self.crawled_at),
             "geo_lat": self.geo_lat,
             "geo_lon": self.geo_lon,
             "geo_country": self.geo_country,
@@ -99,7 +104,7 @@ class CanonicalItemModel(Base):
             "domain": self.domain,
             "sub_domain": self.sub_domain,
             "is_classified": self.is_classified,
-            "created_at": self.created_at.isoformat()
+            "created_at": _iso(self.created_at)
         }
 
     __table_args__ = (

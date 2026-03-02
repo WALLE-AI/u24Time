@@ -237,9 +237,13 @@ class DataScheduler:
             })
 
         try:
-            # 优化点：不再在调度层开启长期 DB 会话。改为让引擎/管道按需开启短连接。
-            # 这能有效防止因大量并行网络 I/O 长期占用 DB 连接池导致的任务挂起。
-            items = await self._dispatch_crawl(source_id, db_session=None)
+            # 还原之前的逻辑：为了确保数据能入库，需要传递 db_session。
+            # 如果不传，engine 和 pipeline 将直接跳过写库逻辑。
+            if self._db_factory:
+                async with self._db_factory() as db_session:
+                    items = await self._dispatch_crawl(source_id, db_session=db_session)
+            else:
+                items = await self._dispatch_crawl(source_id, db_session=None)
 
             # 更新 stale_cache
             self._last_success[source_id] = datetime.now(timezone.utc)
@@ -350,14 +354,9 @@ class DataScheduler:
 
         # ── ModelScope Trending Models/Datasets ───────────────
         if source_id in ("tech.ai.ms_models", "tech.ai.ms_datasets"):
-            async def _do_ms_trending():
-                adapter = ModelScopeAdapter()
-                if "models" in source_id:
-                    rows = await adapter.fetch_models()
-                else:
-                    rows = await adapter.fetch_datasets()
-                return await pipeline.align_and_save(source_id, rows, db_session=db_session)
-            return await self._engine.run_custom_adapter(source_id, _do_ms_trending, db_session=db_session)
+            # ModelScopeAdapter 暂未实现，跳过避免 NameError
+            logger.debug(f"DataScheduler: {source_id} — ModelScopeAdapter 未实现，跳过")
+            return []
 
         # ── Semantic Scholar Trending ────────────────────────
         if source_id == "academic.semantic_scholar.trending":

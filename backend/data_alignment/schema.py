@@ -31,6 +31,7 @@ class DomainType:
     TECH     = "technology"  # 技术域
     ACADEMIC = "academic"    # 学术域
     GLOBAL   = "global"      # 全球监控域
+    ENTERTAINMENT = "entertainment" # 娱乐域
 
 
 class SubDomainType:
@@ -62,6 +63,7 @@ class SubDomainType:
     DISPLACEMENT= "displacement" # 人口流离失所
     UNREST      = "unrest"      # 社会动荡
     SOCIAL      = "social"      # 中文社交舆情
+    ENTERTAINMENT = "entertainment" # 娱乐内容
 
 
 class SeverityLevel:
@@ -336,3 +338,29 @@ def classify_severity_by_keywords(text: str) -> tuple[str, str]:
             if kw.lower() in text_lower:
                 return level, "keyword"
     return SeverityLevel.INFO, "keyword"
+
+
+# ─── 领域分类器 ─────────────────────────────────────────────
+
+DOMAIN_KEYWORDS: dict[str, list[str]] = {
+    DomainType.ENTERTAINMENT: [
+        "娱乐", "明星", "八卦", "爆料", "电影", "综艺", "演唱会", "艺人", 
+        "粉丝", "剧集", "电视剧", "影讯", "乐评", "影评", "娱乐圈", "饭圈",
+        "entertainment", "celeb", "celebrity", "gossip", "movie", "film",
+        "showbiz", "tv show", "concert", "actor", "actress",
+    ],
+    # 可以在此处添加其他领域的关键词以完善自动分类
+}
+
+def classify_domain_by_keywords(text: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    通过关键词分类所属领域。
+    返回 (domain, sub_domain)
+    """
+    text_lower = text.lower()
+    for domain, kws in DOMAIN_KEYWORDS.items():
+        for kw in kws:
+            if kw.lower() in text_lower:
+                # 简单映射：目前 sub_domain 与 domain 同名
+                return domain, domain
+    return None, None
