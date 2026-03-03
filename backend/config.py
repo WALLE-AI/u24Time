@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # CoinGecko 加密货币
     COINGECKO_API_KEY: Optional[str] = Field(None, description="CoinGecko API Key（可选）")
 
+    # GitHub (https://api.github.com)
+    GITHUB_TOKEN: Optional[str] = Field(None, description="GitHub API Token (可选，用于提高限额)")
+
     # EIA 能源数据 (https://www.eia.gov/opendata)
     EIA_API_KEY: Optional[str] = Field(None, description="EIA API Key")
 

@@ -35,8 +35,19 @@ class TechNormalizer:
             url = repo.get("url", repo.get("link", f"https://github.com/{name}"))
             description = repo.get("description", repo.get("extra", {}).get("description", ""))
             language = repo.get("language", repo.get("extra", {}).get("language", ""))
-            stars = int(repo.get("stars", repo.get("extra", {}).get("stars", 0)) or 0)
-            stars_today = int(repo.get("starsToday", repo.get("extra", {}).get("forks", 0)) or 0)
+            
+            # Use extra fields enriched by dual-stage script
+            extra = repo.get("extra", {})
+            stars = int(repo.get("stars", extra.get("stars", 0)) or 0)
+            
+            # Read stars_today from hover if available as a string
+            hover_val = str(extra.get("hover", "")).replace(" ", "").replace(",", "")
+            import re
+            nums = re.findall(r'\d+', hover_val)
+            stars_today = int(nums[0]) if nums else int(repo.get("starsToday", extra.get("forks", 0)) or 0)
+
+            commits_30d = extra.get("commits_30d", 0)
+            last_commit_at = extra.get("last_commit_at")
 
             title = f"⭐ {name}"
             if language:
@@ -44,7 +55,15 @@ class TechNormalizer:
             if description:
                 title += f" — {description[:80]}"
 
-            severity = SeverityLevel.HIGH if stars_today >= 500 else (SeverityLevel.MEDIUM if stars_today >= 100 else SeverityLevel.INFO)
+            # Custom Metric combining stars and commits
+            # Activity Score = stars_today + commits_30d * 5
+            score = stars_today + min(commits_30d, 100) * 5
+            
+            severity = SeverityLevel.INFO
+            if score >= 600:
+                severity = SeverityLevel.CRITICAL if score >= 1000 else SeverityLevel.HIGH
+            elif score >= 200:
+                severity = SeverityLevel.MEDIUM
 
             return CanonicalItem(
                 item_id=_make_id(source_id, name),
@@ -55,10 +74,10 @@ class TechNormalizer:
                 title=title,
                 body=description[:300] if description else "",
                 url=url,
-                published_at=_now_ts(),
+                published_at=last_commit_at or _now_ts(),
                 crawled_at=_now_ts(),
                 severity_level=severity,
-                raw_engagement={"stars": stars, "stars_today": stars_today},
+                raw_engagement={"stars": stars, "stars_today": stars_today, "commits_30d": commits_30d, "score": score},
                 raw_metadata={"language": language, "repo": name},
                 categories=["github", "trending", "oss"],
             )

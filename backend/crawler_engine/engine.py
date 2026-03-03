@@ -430,6 +430,17 @@ class CrawlerEngine:
         all_items: list[CanonicalItem] = []
         try:
             batch = await self._newsnow.fetch_all(source_ids)
+
+            # --- Github Trending Dual-Stage Enrichment Injection ---
+            if "tech.oss.github_trending" in batch:
+                github_items = batch["tech.oss.github_trending"].get("items", [])
+                if github_items:
+                    from crawler_engine.api_adapters.github_adapter import GithubAdapter
+                    adapter = GithubAdapter()
+                    enriched_items = await adapter.enrichen_trending_repos(github_items)
+                    batch["tech.oss.github_trending"]["items"] = enriched_items
+            # ---------------------------------------------------------
+
             task.items_fetched = sum(len(v.get("items", [])) for v in batch.values())
 
             for sid, response in batch.items():

@@ -214,7 +214,7 @@ function HotPanelItems({ items }: { items: any[] }) {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{item.title}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 10, color: '#666', fontWeight: 500 }}>{formatTime(item.published_at || item.crawled_at)}</span>
+              <span style={{ fontSize: 10, color: '#666', fontWeight: 500 }}>{formatTime(item.crawled_at)}</span>
               {item.raw_domain === 'academic' && (
                 <div style={{ display: 'flex', gap: 6 }}>
                   {item.categories && item.categories.length > 0 && item.categories.slice(0, 2).map((c: string, idx: number) => (

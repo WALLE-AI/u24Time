@@ -138,6 +138,16 @@ class AlignmentPipeline:
                 return self._news.normalize_batch_from_feedparser(rows, source_id, feed_category)
             
             if config.source_type == "hotsearch" or source_id.endswith("_newsnow"):
+                # Exception for github trending since we enriched it with GithubAdapter
+                if source_id == "tech.oss.github_trending":
+                    items_raw = rows[0].get("items", []) if len(rows) == 1 and isinstance(rows[0], dict) and "items" in rows[0] else rows
+                    if isinstance(items_raw, dict) and "items" in items_raw:
+                        items_raw = items_raw["items"]  # Just in case
+                    return [
+                        item for row in items_raw
+                        if (item := self._tech.normalize_github_trending(row, source_id)) is not None
+                    ]
+
                 # raw_data 由 NewsNowAdapter.fetch_all() 返回的整个响应 dict 列表
                 if len(rows) == 1 and isinstance(rows[0], dict) and "items" in rows[0]:
                     return self._hotsearch.normalize_batch(rows[0], source_id)
@@ -282,8 +292,7 @@ class AlignmentPipeline:
                     "global.social.bilibili_newsnow", "global.social.douyin_newsnow",
                     "global.social.tieba_newsnow", "economy.stock.wallstreetcn",
                     "economy.stock.cls_hot", "economy.stock.xueqiu",
-                    "global.diplomacy.thepaper", "tech.oss.github_trending",
-                    "tech.oss.coolapk", "tech.oss.toutiao_tech",
+                    "global.diplomacy.thepaper", "tech.oss.coolapk", "tech.oss.toutiao_tech",
                 ]):
             # raw_data 由 NewsNowAdapter.fetch_all() 返回的整个响应 dict 列表
             if len(rows) == 1 and isinstance(rows[0], dict) and "items" in rows[0]:
@@ -359,8 +368,15 @@ class AlignmentPipeline:
         # Tech Events
         if source_id == "tech.oss.tech_events":
             return [item for row in rows if (item := self._tech.normalize_service_status(row, source_id)) is not None]  # Or specific normalizer if needed
+        if source_id == "tech.oss.github_trending":
+            items_raw = rows[0].get("items", []) if len(rows) == 1 and isinstance(rows[0], dict) and "items" in rows[0] else rows
+            return [
+                item for row in items_raw
+                if (item := self._tech.normalize_github_trending(row, source_id)) is not None
+            ]
+
         # NewsNow-based tech hotsearch
-        if source_id in ("tech.oss.github_trending", "tech.oss.coolapk", "tech.oss.toutiao_tech"):
+        if source_id in ("tech.oss.coolapk", "tech.oss.toutiao_tech"):
             if len(rows) == 1 and isinstance(rows[0], dict) and "items" in rows[0]:
                 return self._hotsearch.normalize_batch(rows[0], source_id)
             return self._hotsearch.normalize_batch({"items": rows}, source_id)
