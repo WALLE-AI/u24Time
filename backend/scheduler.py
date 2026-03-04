@@ -256,6 +256,19 @@ class DataScheduler:
                     "domain": _domain,  # e.g. "economy", "global", "technology", "academic"
                     "items_count": len(items),
                     "timestamp": self._last_success[source_id].isoformat(),
+                    "items": [
+                        {
+                            "item_id": i.item_id,
+                            "title": i.title,
+                            "url": i.url,
+                            "domain": i.domain or "global",
+                            "sub_domain": i.sub_domain,
+                            "source_id": i.source_id,
+                            "crawled_at": i.crawled_at.isoformat() if i.crawled_at else None,
+                            "published_at": i.published_at.isoformat() if i.published_at else None,
+                            "hotness_score": i.hotness_score
+                        } for i in items[:20]  # 只传前20条节省带宽
+                    ]
                 })
             logger.info(f"DataScheduler: {source_id} 完成，{len(items)} 条")
 

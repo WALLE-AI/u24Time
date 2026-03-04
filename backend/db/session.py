@@ -14,7 +14,11 @@ from db.models import Base
 
 # ─── Sync Engine (for Alembic + simple ops) ──────────────────
 sync_engine_args = {"echo": settings.DB_ECHO}
-if settings.DB_TYPE != "sqlite":
+if settings.DB_TYPE == "sqlite":
+    sync_engine_args.update({
+        "connect_args": {"timeout": 30, "check_same_thread": False}
+    })
+elif settings.DB_TYPE != "sqlite":
     sync_engine_args.update({
         "pool_pre_ping": True,
         "pool_size": 20,
@@ -27,6 +31,15 @@ sync_engine = create_engine(
 )
 
 SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
+
+if settings.DB_TYPE == "sqlite":
+    from sqlalchemy import event
+    @event.listens_for(sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 @contextmanager
@@ -44,7 +57,11 @@ def get_sync_session() -> Session:
 
 # ─── Async Engine (for application runtime) ──────────────────
 async_engine_args = {"echo": settings.DB_ECHO}
-if settings.DB_TYPE != "sqlite":
+if settings.DB_TYPE == "sqlite":
+    async_engine_args.update({
+        "connect_args": {"timeout": 30, "check_same_thread": False}
+    })
+elif settings.DB_TYPE != "sqlite":
     async_engine_args.update({
         "pool_pre_ping": True,
         "pool_size": 20,
@@ -61,6 +78,15 @@ AsyncSessionFactory = async_sessionmaker(
     expire_on_commit=False,
     class_=AsyncSession,
 )
+
+if settings.DB_TYPE == "sqlite":
+    from sqlalchemy import event
+    @event.listens_for(async_engine.sync_engine, "connect")
+    def set_sqlite_pragma_async(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 @asynccontextmanager

@@ -159,7 +159,7 @@ class CrawlerEngine:
                         finished_at=task.finished_at,
                     )
                     db_session.add(task_model)
-                    await db_session.commit()
+                    await db_session.flush()  # outer _crawl() context handles commit
                 except Exception as e:
                     logger.error(f"Failed to save CrawlTask to DB: {e}")
 
@@ -333,7 +333,7 @@ class CrawlerEngine:
                         finished_at=task.finished_at,
                     )
                     db_session.add(task_model)
-                    await db_session.commit()
+                    await db_session.flush()  # outer _crawl() context handles commit
                 except Exception as e:
                     logger.error(f"Failed to save CrawlTask to DB: {e}")
 
@@ -390,7 +390,7 @@ class CrawlerEngine:
                         finished_at=task.finished_at,
                     )
                     db_session.add(task_model)
-                    await db_session.commit()
+                    await db_session.flush()  # outer _crawl() context handles commit
                 except Exception as e:
                     logger.error(f"Failed to save CrawlTask to DB: {e}")
 
@@ -479,7 +479,7 @@ class CrawlerEngine:
                         finished_at=task.finished_at,
                     )
                     db_session.add(task_model)
-                    await db_session.commit()
+                    await db_session.flush()  # outer _crawl() context handles commit
                 except Exception as e:
                     logger.error(f"Failed to save CrawlTask to DB: {e}")
 

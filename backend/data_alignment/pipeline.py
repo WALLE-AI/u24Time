@@ -395,18 +395,71 @@ class AlignmentPipeline:
         """
         items = self.align(source_id, raw_data, meta)
 
+        # ── <NEW> 内存直传: 写入 NewsFlash Deque ───────────────────────
+        from memory_cache import news_flash_cache
+        # 把最新对齐的数据加到队列头部
+        for item in reversed(items):
+            # 转换为前端直用的格式 dict
+            item_dict = {
+                "item_id": item.item_id,
+                "title": item.title,
+                "url": item.url,
+                "domain": item.domain or "global",
+                "sub_domain": item.sub_domain,
+                "source_id": item.source_id,
+                "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
+                "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
+                "hotness_score": item.hotness_score
+            }
+            news_flash_cache.appendleft(item_dict)
+        # ──────────────────────────────────────────────────────────────
+
         if db_session is not None and items:
-            from sqlalchemy import select
+            from sqlalchemy import select, update
             from db.models import CanonicalItemModel
             try:
-                # 1. 批量查询已存在的 item_id，避免 IntegrityError
+                # 1. 批量查询已存在的 item_id
                 ids = [i.item_id for i in items]
                 stmt = select(CanonicalItemModel.item_id).where(CanonicalItemModel.item_id.in_(ids))
                 existing_ids = set((await db_session.execute(stmt)).scalars().all())
 
                 new_items = [i for i in items if i.item_id not in existing_ids]
+                existing_items = [i for i in items if i.item_id in existing_ids]
+
+                # 2. UPSERT: 批量更新已存在条目的 crawled_at 和 hotness_score
+                if existing_items:
+                    from datetime import datetime, timezone
+                    now_utc = datetime.now(timezone.utc)
+                    
+                    # 使用 in_ 语句批量更新所有匹配的 item_id，避免每条都需要提供内部主键 id
+                    # 由于对已存在的条目，我们主要只是刷新最后更新时间，这里为了最高效直接把所有现有的刷同一时刻
+                    existing_item_ids = [item.item_id for item in existing_items]
+                    
+                    # 如果有热度变化，则按热度分组更新，否则全部一起更新时间戳
+                    # 简单分为 无热度/有热度 两种更新
+                    items_with_heat = [i for i in existing_items if i.hotness_score is not None and i.hotness_score > 0]
+                    items_without_heat = [i.item_id for i in existing_items if i.hotness_score is None or i.hotness_score == 0]
+
+                    if items_without_heat:
+                        await db_session.execute(
+                            update(CanonicalItemModel)
+                            .where(CanonicalItemModel.item_id.in_(items_without_heat))
+                            .values(crawled_at=now_utc)
+                        )
+                        
+                    if items_with_heat:
+                        # 对于有具体热度分数的记录（股市/热榜等），按组分别更新
+                        for item in items_with_heat:
+                            await db_session.execute(
+                                update(CanonicalItemModel)
+                                .where(CanonicalItemModel.item_id == item.item_id)
+                                .values(crawled_at=now_utc, hotness_score=item.hotness_score)
+                            )
+                            
+                    logger.info(f"AlignmentPipeline: 更新 {len(existing_items)} 条已有记录 crawled_at source={source_id}")
+
                 if not new_items:
-                    logger.info(f"AlignmentPipeline: {len(items)} 条已存在，跳过写入 source={source_id}")
+                    await db_session.flush()
                     return items
 
                 # === LLM Batch Classification ===

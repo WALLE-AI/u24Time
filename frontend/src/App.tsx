@@ -571,8 +571,8 @@ export default function App() {
     }
   }, []);
 
-  // Fetch Dashboard Data
-  const fetchData = async (domain?: string) => {
+  // ── Dashboard Data Fetch (wrapped in useCallback for stable ref) ──
+  const fetchData = useCallback(async (domain?: string) => {
     try {
       const respDomains = await fetch(`${API_BASE}/api/v1/domains`);
       const dataDomains = await respDomains.json();
@@ -580,7 +580,7 @@ export default function App() {
         const stats: StatItem[] = dataDomains.domains.map((d: any) => ({
           label: d.name_cn,
           value: d.source_count.toString(),
-          delta: '+0', // backend doesn't provide delta yet
+          delta: '+0',
           positive: true
         }));
         setDomainStats(stats);
@@ -606,6 +606,7 @@ export default function App() {
           url.searchParams.append('sub_domain', academicSubCategory);
         }
       }
+      url.searchParams.append('_t', String(Date.now())); // Cache buster
 
       const respItems = await fetch(url.toString());
       const dataItems = await respItems.json();
@@ -634,11 +635,16 @@ export default function App() {
         }));
       }
 
-      // Fetch News Flash (latest 8 items)
-      const flashUrl = new URL(`${API_BASE}/api/v1/items`);
+    } catch (err) {
+      console.error('Failed to fetch dashboard data:', err);
+    }
+  }, [economySubCategory, techSubCategory, academicSubCategory]);
+
+  // ── 独立的时讯快报拉取函数（走内存极速接口）────────
+  const fetchNewsFlash = useCallback(async (domain?: string) => {
+    try {
+      const flashUrl = new URL(`${API_BASE}/api/v1/newsflash`);
       flashUrl.searchParams.append('limit', '8');
-      flashUrl.searchParams.append('sort', 'time');
-      flashUrl.searchParams.append('last_24h', 'true');
       if (domain && domain !== 'all') {
         flashUrl.searchParams.append('domain', domain);
       }
@@ -649,18 +655,14 @@ export default function App() {
         setLastRefreshed(new Date());
       }
     } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
+      console.error('Failed to fetch news flash:', err);
     }
-  };
+  }, []);
 
-  // 1-minute auto-refresh for News Flash and Rankings
+  // Use SSE events (scheduler_done) to trigger refreshes instead of hardcoded polling
   useEffect(() => {
-    const timer = setInterval(() => {
-      addLog({ level: 'INFO', domain: 'SYS', msg: '实时同步：正在刷新今日时讯与热搜排行' });
-      fetchData(activeTab);
-    }, 60000);
-    return () => clearInterval(timer);
-  }, [activeTab, addLog]);
+    // Intentionally empty or handle other activeTab specific logic without setInterval
+  }, [activeTab]);
 
   const fetchSummary = async (domain?: string, force = false) => {
     const cacheKey = `u24_ai_summary_${domain || 'all'}`;
@@ -698,6 +700,13 @@ export default function App() {
       setIsSummarizing(false);
     }
   };
+
+  const fetchDataRef = useRef(fetchData);
+  useEffect(() => { fetchDataRef.current = fetchData; }, [fetchData]);
+  const fetchNewsFlashRef = useRef(fetchNewsFlash);
+  useEffect(() => { fetchNewsFlashRef.current = fetchNewsFlash; }, [fetchNewsFlash]);
+  const activeTabForFlashRef = useRef(activeTab);
+  useEffect(() => { activeTabForFlashRef.current = activeTab; }, [activeTab]);
 
   // SSE SSE Connection
   useEffect(() => {
@@ -767,18 +776,42 @@ export default function App() {
           }));
         }
 
-        // Refresh hot ranking whenever any domain data updates
+        // Refresh data on scheduler events
         if (data.event === 'scheduler_done') {
           const currentTab = activeTabRef.current;
           const eventDomain = data.domain as string | undefined;
-          // 'all' tab: refresh on any domain update
-          // domain tab: refresh only when that domain's data updated
-          if (currentTab === 'all' || !eventDomain || eventDomain === currentTab) {
-            fetchData(currentTab);
+
+          const isMatch = currentTab === 'all' || !eventDomain || eventDomain === currentTab;
+
+          // 【修复】今日时讯快报：0延迟内存流直达，不再走网络请求
+          if (data.items && data.items.length > 0) {
+            // 全球tab，或者特定tab匹配上的，直接插入前端状态
+            if (isMatch) {
+              setNewsFlashItems(prev => {
+                const combined = [...data.items, ...prev];
+                const uniqueMap = new Map();
+                combined.forEach(item => {
+                  if (!uniqueMap.has(item.item_id || item.url)) {
+                    uniqueMap.set(item.item_id || item.url, item);
+                  }
+                });
+                return Array.from(uniqueMap.values()).slice(0, 8);
+              });
+              setLastRefreshed(new Date());
+            }
+          } else {
+            // Fallback back to fetching
+            fetchNewsFlashRef.current(currentTab !== 'all' ? currentTab : undefined);
+          }
+
+          // 热搜排行：依然走网络请求获取计算后的数据
+          if (isMatch) {
+            fetchDataRef.current(currentTab);
           }
         } else if (data.event.includes('complete')) {
-          // Other crawl events (manual API/RSS/hotsearch) also refresh rankings
-          fetchData(activeTabRef.current);
+          // Other crawl events (manual API/RSS/hotsearch) also refresh both
+          fetchNewsFlashRef.current(activeTabForFlashRef.current !== 'all' ? activeTabForFlashRef.current : undefined);
+          fetchDataRef.current(activeTabRef.current);
         }
       } catch (err) {
         console.error('Failed to parse SSE message:', err);
@@ -798,40 +831,18 @@ export default function App() {
 
   useEffect(() => {
     fetchData(activeTab);
-  }, [activeTab, economySubCategory, techSubCategory, academicSubCategory]);
+    fetchNewsFlash(activeTab !== 'all' ? activeTab : undefined);
+  }, [activeTab, fetchData, fetchNewsFlash]);
 
-  // Economy 1-minute auto-refresh timer
+  // 2分钟安全网咋轮询——防止 SSE 断连期间错过数据更新
   useEffect(() => {
-    if (activeTab === 'economy') {
-      const timer = setInterval(() => {
-        addLog({ level: 'INFO', domain: 'ECON', msg: '触发生发经济数据 60s 周期性刷新' });
-        fetchData('economy');
-      }, 60000);
-      return () => clearInterval(timer);
-    }
-  }, [activeTab, economySubCategory, addLog]);
-
-  // Tech 5-minute auto-refresh timer
-  useEffect(() => {
-    if (activeTab === 'technology') {
-      const timer = setInterval(() => {
-        addLog({ level: 'INFO', domain: 'TECH', msg: '触发生发技术数据 300s 周期性刷新' });
-        fetchData('technology');
-      }, 300000);
-      return () => clearInterval(timer);
-    }
-  }, [activeTab, techSubCategory, addLog]);
-
-  // Academic 5-minute auto-refresh timer
-  useEffect(() => {
-    if (activeTab === 'academic') {
-      const timer = setInterval(() => {
-        addLog({ level: 'INFO', domain: 'ACAD', msg: '触发生发学术数据 300s 周期性刷新' });
-        fetchData('academic');
-      }, 300000);
-      return () => clearInterval(timer);
-    }
-  }, [activeTab, academicSubCategory, addLog]);
+    const timer = setInterval(() => {
+      const tab = activeTabForFlashRef.current;
+      fetchDataRef.current(tab);
+      fetchNewsFlashRef.current(tab !== 'all' ? tab : undefined);
+    }, 2 * 60 * 1000); // 2 minutes
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     fetchTaskCenter();
@@ -910,7 +921,7 @@ export default function App() {
             <PanelBox
               title={activeTab === 'economy' ? "经济动态排名" : "热搜排行"}
               icon={<TrendingUp size={14} />}
-              badge={activeTab === 'economy' ? "1分钟自动刷新" : "数据源更新即刷新"}
+              badge="实时 (SSE 推送)"
               count={hotItems.length}
               style={{ minHeight: 480 }}
               actions={(

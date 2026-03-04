@@ -385,95 +385,118 @@ def crawl_task_detail(task_id: str):
 
 @app.route("/api/v1/items")
 def list_items():
-    """
-    查询 CanonicalItem（需要 DB 连接）。
-    Query params: source_type, source_id, severity,
-                  page (default 1), limit (default 50)
-    """
+    """获取对齐后的数据列表 (支持按 domain 过滤，支持只看最近24小时，仅供热搜榜等使用)"""
+    limit = int(request.args.get("limit", 50))
+    page = max(1, int(request.args.get("page", 1)))
+    domain = request.args.get("domain")
+    sub_domain = request.args.get("sub_domain")
+    sort_by = request.args.get("sort", "time")  # time / heat
+    last_24h = request.args.get("last_24h", "false").lower() == "true"
+
     try:
         from db.session import get_sync_session
         from db.models import CanonicalItemModel
-        from sqlalchemy import select, desc
-
-        source_type = request.args.get("source_type")
-        source_id = request.args.get("source_id")
-        domain = request.args.get("domain")
-        severity = request.args.get("severity")
-        sort = request.args.get("sort", "hotness") # Default to hotness
-        last_24h = request.args.get("last_24h", "false").lower() == "true"
-        page = max(1, int(request.args.get("page", 1)))
-        limit = min(200, max(1, int(request.args.get("limit", 50))))
+        from sqlalchemy import select, desc, func
+        from datetime import datetime, timedelta, timezone
 
         with get_sync_session() as session:
-            # Determine base statement
             stmt = select(CanonicalItemModel)
-
-            # Filtering by the last 24 hours (rolling window)
+            
             if last_24h:
-                from datetime import datetime, timezone, timedelta
-                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-                stmt = stmt.where(CanonicalItemModel.crawled_at >= cutoff)
-
-            # Determine order_by based on sort parameter
-            if sort == "time":
-                stmt = stmt.order_by(desc(CanonicalItemModel.crawled_at))
-            else:
-                stmt = stmt.order_by(desc(CanonicalItemModel.hotness_score), desc(CanonicalItemModel.crawled_at))
+                yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+                stmt = stmt.where(CanonicalItemModel.crawled_at >= yesterday)
 
             if domain and domain != "all":
-                stmt = stmt.where(CanonicalItemModel.domain == domain)
-                
-                # 强制保护学术域：仅允许真正来源于 academic.* 的数据
-                if domain == "academic":
-                    stmt = stmt.where(CanonicalItemModel.source_id.startswith("academic."))
-                    
-            if source_type:
-                stmt = stmt.where(CanonicalItemModel.source_type == source_type)
-            if source_id:
-                stmt = stmt.where(CanonicalItemModel.source_id == source_id)
+                if domain == "global":
+                    stmt = stmt.where(CanonicalItemModel.domain.in_(["global", None, ""]))
+                else:
+                    stmt = stmt.where(CanonicalItemModel.domain == domain)
             
-            source_prefix = request.args.get("source_prefix")
-            if source_prefix:
-                stmt = stmt.where(CanonicalItemModel.source_id.startswith(source_prefix))
-
-            sub_domain = request.args.get("sub_domain")
             if sub_domain and sub_domain != "all":
                 stmt = stmt.where(CanonicalItemModel.sub_domain == sub_domain)
-            if severity:
-                stmt = stmt.where(CanonicalItemModel.severity_level == severity)
+
+            if sort_by == "heat":
+                stmt = stmt.order_by(desc(CanonicalItemModel.hotness_score), desc(CanonicalItemModel.crawled_at))
+            else:
+                stmt = stmt.order_by(desc(CanonicalItemModel.crawled_at))
+
             stmt = stmt.offset((page - 1) * limit).limit(limit)
             rows = session.scalars(stmt).all()
+            
+            count_stmt = select(func.count(CanonicalItemModel.item_id))
+            if domain and domain != "all":
+                if domain == "global":
+                    count_stmt = count_stmt.where(CanonicalItemModel.domain.in_(["global", None, ""]))
+                else:
+                    count_stmt = count_stmt.where(CanonicalItemModel.domain == domain)
+            total = session.scalar(count_stmt)
+            
+            # format timestamps strictly as strings for json
+            def _format_db_dt(dt):
+                if not dt: return None
+                from datetime import timezone
+                return dt.replace(tzinfo=timezone.utc).isoformat() if dt.tzinfo is None else dt.isoformat()
 
-        def _format_db_dt(dt):
-            if not dt: return None
-            from datetime import timezone
-            return dt.replace(tzinfo=timezone.utc).isoformat() if dt.tzinfo is None else dt.isoformat()
-
-        items = [
-            {
-                "item_id": r.item_id,
-                "source_id": r.source_id,
-                "source_type": r.source_type,
-                "title": r.title,
-                "url": r.url,
-                "published_at": _format_db_dt(r.published_at),
-                "hotness_score": r.hotness_score,
-                "severity_level": r.severity_level,
-                "geo_lat": r.geo_lat,
-                "geo_lon": r.geo_lon,
-                "geo_country": r.geo_country,
-                "categories": r.categories,
-                "domain": r.domain,
-                "sub_domain": r.sub_domain,
-                "crawled_at": _format_db_dt(r.crawled_at),
-            }
-            for r in rows
-        ]
-        return ok(data=items, page=page, limit=limit)
-
+            items_list = [
+                {
+                    "item_id": r.item_id,
+                    "source_id": r.source_id,
+                    "source_type": r.source_type,
+                    "title": r.title,
+                    "url": r.url,
+                    "published_at": _format_db_dt(r.published_at),
+                    "hotness_score": r.hotness_score,
+                    "severity_level": r.severity_level,
+                    "geo_lat": r.geo_lat,
+                    "geo_lon": r.geo_lon,
+                    "geo_country": r.geo_country,
+                    "categories": r.categories,
+                    "domain": r.domain,
+                    "sub_domain": r.sub_domain,
+                    "crawled_at": _format_db_dt(r.crawled_at),
+                }
+                for r in rows
+            ]
+            
+        return ok(data=items_list, total=total, page=page, limit=limit)
     except Exception as e:
-        logger.warning(f"/api/v1/items DB 查询失败（可能 DB 未初始化）: {e}")
-        return ok(data=[], msg=f"DB not available: {e}")
+        logger.error(f"API List Items: DB 查询异常 → {e}")
+        return err(f"Database error: {str(e)}", 500)
+
+
+@app.route("/api/v1/newsflash")
+def get_newsflash():
+    """0-latency In-Memory endpoint for NewsFlash panel. No DB queries involved."""
+    from memory_cache import news_flash_cache
+    limit = int(request.args.get("limit", 8))
+    domain = request.args.get("domain")
+    
+    domain_map = {
+        "全球监控": "global",
+        "经济": "economy", 
+        "技术": "technology",
+        "学术": "academic",
+        "娱乐": "entertainment"
+    }
+    if domain in domain_map:
+        domain = domain_map[domain]
+    
+    # news_flash_cache is a deque, convert to list to iterate/filter
+    cache_list = list(news_flash_cache)
+    
+    if domain and domain != "all":
+        # Check against both actual domain string and empty/None for global
+        filtered = []
+        for item in cache_list:
+            d = item.get("domain")
+            if domain == "global" and (not d or d == "global"):
+                filtered.append(item)
+            elif d == domain:
+                filtered.append(item)
+    else:
+        filtered = cache_list
+        
+    return ok(data=filtered[:limit], total=len(filtered))
 
 
 # ══════════════════════════════════════════════════════════════
