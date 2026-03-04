@@ -395,24 +395,7 @@ class AlignmentPipeline:
         """
         items = self.align(source_id, raw_data, meta)
 
-        # ── <NEW> 内存直传: 写入 NewsFlash Deque ───────────────────────
-        from memory_cache import news_flash_cache
-        # 把最新对齐的数据加到队列头部
-        for item in reversed(items):
-            # 转换为前端直用的格式 dict
-            item_dict = {
-                "item_id": item.item_id,
-                "title": item.title,
-                "url": item.url,
-                "domain": item.domain or "global",
-                "sub_domain": item.sub_domain,
-                "source_id": item.source_id,
-                "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
-                "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
-                "hotness_score": item.hotness_score
-            }
-            news_flash_cache.appendleft(item_dict)
-        # ──────────────────────────────────────────────────────────────
+        # (Moved news_flash_cache append to the end, after DB dedup and LLM classification)
 
         if db_session is not None and items:
             from sqlalchemy import select, update
@@ -510,6 +493,24 @@ class AlignmentPipeline:
                     logger.error(f"AlignmentPipeline: LLM 分类过程异常 source={source_id} err={e}")
                 # ================================
 
+                # ── <NEW> 内存直传: 写入 NewsFlash Deque ───────────────────────
+                from memory_cache import news_flash_cache
+                # 把最新对齐并在DB确认为“全新”的数据加到队列头部，确保推送的时讯都是新热点
+                for item in reversed(new_items):
+                    item_dict = {
+                        "item_id": item.item_id,
+                        "title": item.title,
+                        "url": item.url,
+                        "domain": item.domain or "global",
+                        "sub_domain": item.sub_domain,
+                        "source_id": item.source_id,
+                        "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
+                        "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
+                        "hotness_score": item.hotness_score
+                    }
+                    news_flash_cache.appendleft(item_dict)
+                # ──────────────────────────────────────────────────────────────
+
                 for item in new_items:
                     model = CanonicalItemModel(
                         item_id=item.item_id,
@@ -545,5 +546,21 @@ class AlignmentPipeline:
                 logger.error(f"AlignmentPipeline: DB 写入失败 source={source_id} err={e}")
                 await db_session.rollback()
                 raise
+        else:
+            # 如果没有DB Session，我们也是尽力而为存到内缓存
+            from memory_cache import news_flash_cache
+            for item in reversed(items):
+                item_dict = {
+                    "item_id": item.item_id,
+                    "title": item.title,
+                    "url": item.url,
+                    "domain": item.domain or "global",
+                    "sub_domain": item.sub_domain,
+                    "source_id": item.source_id,
+                    "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
+                    "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
+                    "hotness_score": item.hotness_score
+                }
+                news_flash_cache.appendleft(item_dict)
 
         return items
