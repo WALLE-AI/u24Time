@@ -395,33 +395,69 @@ class AlignmentPipeline:
         """
         items = self.align(source_id, raw_data, meta)
 
-        # (Moved news_flash_cache append to the end, after DB dedup and LLM classification)
+        # ── 内存直传：无论 DB 写入结果如何，先把最新数据推入 NewsFlash Deque ──
+        # 关键修复：必须在任何 DB 早期返回 (return) 之前执行，否则当所有条目已存在 DB 时
+        # 会走 `if not new_items: return items` 跳过这里，导致 deque 永远不更新。
+        from memory_cache import news_flash_cache
+        for item in reversed(items):
+            item_dict = {
+                "item_id": item.item_id,
+                "title": item.title,
+                "url": item.url,
+                "domain": item.domain or "global",
+                "sub_domain": item.sub_domain,
+                "source_id": item.source_id,
+                "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
+                "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
+                "hotness_score": item.hotness_score
+            }
+            # 队列内去重：先删旧版本，再置顶最新版本（保证价格/热度实时更新）
+            cache_list = list(news_flash_cache)
+            for old in cache_list:
+                if old["item_id"] == item.item_id:
+                    try:
+                        news_flash_cache.remove(old)
+                    except ValueError:
+                        pass
+                    break
+            news_flash_cache.appendleft(item_dict)
+        # ────────────────────────────────────────────────────────────────
 
         if db_session is not None and items:
             from sqlalchemy import select, update
             from db.models import CanonicalItemModel
             try:
-                # 1. 批量查询已存在的 item_id
+                # 1. 批量查询已存在的 item_id（同时取回 domain/sub_domain 还原正确分类）
                 ids = [i.item_id for i in items]
-                stmt = select(CanonicalItemModel.item_id).where(CanonicalItemModel.item_id.in_(ids))
-                existing_ids = set((await db_session.execute(stmt)).scalars().all())
+                stmt = select(
+                    CanonicalItemModel.item_id,
+                    CanonicalItemModel.domain,
+                    CanonicalItemModel.sub_domain
+                ).where(CanonicalItemModel.item_id.in_(ids))
 
-                new_items = [i for i in items if i.item_id not in existing_ids]
-                existing_items = [i for i in items if i.item_id in existing_ids]
+                existing_records = (await db_session.execute(stmt)).all()
+                existing_info = {r.item_id: (r.domain, r.sub_domain) for r in existing_records}
 
-                # 2. UPSERT: 批量更新已存在条目的 crawled_at 和 hotness_score
+                new_items = []
+                existing_items = []
+                for item in items:
+                    if item.item_id in existing_info:
+                        domain, sub_domain = existing_info[item.item_id]
+                        if domain:
+                            item.domain = domain
+                        if sub_domain:
+                            item.sub_domain = sub_domain
+                        existing_items.append(item)
+                    else:
+                        new_items.append(item)
+
+                # 2. UPSERT: 刷新已存在条目的 crawled_at（以及热度）
                 if existing_items:
                     from datetime import datetime, timezone
                     now_utc = datetime.now(timezone.utc)
-                    
-                    # 使用 in_ 语句批量更新所有匹配的 item_id，避免每条都需要提供内部主键 id
-                    # 由于对已存在的条目，我们主要只是刷新最后更新时间，这里为了最高效直接把所有现有的刷同一时刻
-                    existing_item_ids = [item.item_id for item in existing_items]
-                    
-                    # 如果有热度变化，则按热度分组更新，否则全部一起更新时间戳
-                    # 简单分为 无热度/有热度 两种更新
+
                     items_with_heat = [i for i in existing_items if i.hotness_score is not None and i.hotness_score > 0]
-                    items_without_heat = [i.item_id for i in existing_items if i.hotness_score is None or i.hotness_score == 0]
+                    items_without_heat = [i.item_id for i in existing_items if not (i.hotness_score is not None and i.hotness_score > 0)]
 
                     if items_without_heat:
                         await db_session.execute(
@@ -429,88 +465,66 @@ class AlignmentPipeline:
                             .where(CanonicalItemModel.item_id.in_(items_without_heat))
                             .values(crawled_at=now_utc)
                         )
-                        
+
                     if items_with_heat:
-                        # 对于有具体热度分数的记录（股市/热榜等），按组分别更新
                         for item in items_with_heat:
                             await db_session.execute(
                                 update(CanonicalItemModel)
                                 .where(CanonicalItemModel.item_id == item.item_id)
                                 .values(crawled_at=now_utc, hotness_score=item.hotness_score)
                             )
-                            
+
                     logger.info(f"AlignmentPipeline: 更新 {len(existing_items)} 条已有记录 crawled_at source={source_id}")
 
+                # 无新条目——直接 flush 后返回（cache 已在上方更新）
                 if not new_items:
                     await db_session.flush()
                     return items
 
-                # === LLM Batch Classification ===
+                # === LLM 领域分类（仅对确实没有已知 domain 的全新条目）===
+                # 不对 hotsearch/social 源运行 LLM，这些源的 domain 由 registry 和 normalizer 确定，
+                # LLM 会在没有上下文时错误地将中文内容全部归为 "technology"。
+                # 只对 domain 确实为空的 new_items 运行分类。
                 try:
                     from utils.llm_client import LLMClient
                     llm = LLMClient()
-                    if llm.api_key:
-                        # 仅对以下情况进行 LLM 领域重分类：
-                        # 1. domain 为空 — 来源不明
-                        # 2. domain == "global" 且来源是 global.social.*/global.diplomacy.* — 可能混合各域内容
-                        # 排除：tech.oss.*/economy.stock.* 等已有明确 domain 的热搜源，防止 LLM 错误覆盖
-                        _NEEDS_LLM_PREFIXES = ("global.social.", "global.diplomacy.")
-                        items_to_classify = [
-                            item for item in new_items
-                            if not item.domain
-                            or (
-                                item.domain == "global"
-                                and any(item.source_id.startswith(p) for p in _NEEDS_LLM_PREFIXES)
-                            )
-                        ]
-                        
-                        if items_to_classify:
-                            BATCH_SIZE = 20
-                            for i in range(0, len(items_to_classify), BATCH_SIZE):
-                                batch = items_to_classify[i:i+BATCH_SIZE]
-                                items_data = [
-                                    {
-                                        "id": item.item_id, 
-                                        "title": item.title, 
-                                        "body": item.body or item.title
-                                    }
-                                    for item in batch
-                                ]
-                                
-                                classification_results = await llm.classify_items_batch(items_data)
-                                
-                                for item in batch:
-                                    if item.item_id in classification_results:
-                                        res = classification_results[item.item_id]
-                                        item.domain = res["domain"]
-                                        if res["sub_domain"]:
-                                            item.sub_domain = res["sub_domain"]
-                                        item.is_classified = True
-                                        item.classification_source = "llm"
-                                        
-                            logger.info(f"AlignmentPipeline: 完成 {len(items_to_classify)} 条目的 LLM 领域分类 source={source_id}")
+                    # 只分类那些经过 align 后仍然没有分配到 domain 的新条目
+                    # 注意：不对 global.social.* / economy.stock.* / tech.* 等已有确定 domain 的来源使用 LLM
+                    _SKIP_LLM_PREFIXES = (
+                        "global.social.", "global.diplomacy.",
+                        "economy.stock.", "economy.crypto.", "economy.futures.",
+                        "tech.oss.", "tech.ai.", "tech.infra.", "tech.cyber.",
+                        "academic.",
+                    )
+                    items_needing_llm = [
+                        item for item in new_items
+                        if not item.domain
+                        and not any(item.source_id.startswith(p) for p in _SKIP_LLM_PREFIXES)
+                    ]
+
+                    if items_needing_llm and llm.api_key:
+                        BATCH_SIZE = 20
+                        for i in range(0, len(items_needing_llm), BATCH_SIZE):
+                            batch = items_needing_llm[i:i+BATCH_SIZE]
+                            items_data = [
+                                {"id": item.item_id, "title": item.title, "body": item.body or item.title}
+                                for item in batch
+                            ]
+                            classification_results = await llm.classify_items_batch(items_data)
+                            for item in batch:
+                                if item.item_id in classification_results:
+                                    res = classification_results[item.item_id]
+                                    item.domain = res["domain"]
+                                    if res["sub_domain"]:
+                                        item.sub_domain = res["sub_domain"]
+                                    item.is_classified = True
+                                    item.classification_source = "llm"
+                        logger.info(f"AlignmentPipeline: LLM 分类 {len(items_needing_llm)} 新条目 source={source_id}")
                 except Exception as e:
-                    logger.error(f"AlignmentPipeline: LLM 分类过程异常 source={source_id} err={e}")
-                # ================================
+                    logger.error(f"AlignmentPipeline: LLM 分类异常 source={source_id} err={e}")
+                # ======================================================
 
-                # ── <NEW> 内存直传: 写入 NewsFlash Deque ───────────────────────
-                from memory_cache import news_flash_cache
-                # 把最新对齐并在DB确认为“全新”的数据加到队列头部，确保推送的时讯都是新热点
-                for item in reversed(new_items):
-                    item_dict = {
-                        "item_id": item.item_id,
-                        "title": item.title,
-                        "url": item.url,
-                        "domain": item.domain or "global",
-                        "sub_domain": item.sub_domain,
-                        "source_id": item.source_id,
-                        "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
-                        "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
-                        "hotness_score": item.hotness_score
-                    }
-                    news_flash_cache.appendleft(item_dict)
-                # ──────────────────────────────────────────────────────────────
-
+                # 3. 写入新条目到 DB
                 for item in new_items:
                     model = CanonicalItemModel(
                         item_id=item.item_id,
@@ -533,8 +547,8 @@ class AlignmentPipeline:
                         raw_metadata=item.raw_metadata,
                         categories=item.categories,
                         keywords=item.keywords,
-                        domain=item.domain,          # 新增
-                        sub_domain=item.sub_domain,  # 新增
+                        domain=item.domain,
+                        sub_domain=item.sub_domain,
                         is_classified=item.is_classified,
                         classification_source=item.classification_source,
                     )
@@ -546,21 +560,6 @@ class AlignmentPipeline:
                 logger.error(f"AlignmentPipeline: DB 写入失败 source={source_id} err={e}")
                 await db_session.rollback()
                 raise
-        else:
-            # 如果没有DB Session，我们也是尽力而为存到内缓存
-            from memory_cache import news_flash_cache
-            for item in reversed(items):
-                item_dict = {
-                    "item_id": item.item_id,
-                    "title": item.title,
-                    "url": item.url,
-                    "domain": item.domain or "global",
-                    "sub_domain": item.sub_domain,
-                    "source_id": item.source_id,
-                    "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
-                    "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
-                    "hotness_score": item.hotness_score
-                }
-                news_flash_cache.appendleft(item_dict)
 
         return items
+

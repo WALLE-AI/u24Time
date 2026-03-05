@@ -891,7 +891,7 @@ export default function App() {
               : <><WifiOff size={13} style={{ color: '#f87171' }} /><span style={{ color: '#f87171' }}>重连中</span></>}
           </span>
           <button
-            onClick={() => { fetchData(activeTab); fetchSummary(activeTab, true); }}
+            onClick={() => { fetchData(activeTab); fetchNewsFlash(activeTab !== 'all' ? activeTab : undefined); fetchSummary(activeTab, true); }}
             style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', border: '1.5px solid #333', background: 'none', color: '#ccc', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}
           >
             <RefreshCw size={12} /> 刷新

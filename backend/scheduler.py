@@ -39,7 +39,7 @@ except ImportError:
 # ──────────────────────────────────────────────────────────────
 
 REALTIME_INTERVAL_MIN  = 1    # 价格/飞行/服务状态
-NEWS_INTERVAL_MIN      = 15   # 新闻/热搜
+NEWS_INTERVAL_MIN      = 5    # 新闻/热搜 (changed from 15)
 EVENT_INTERVAL_MIN     = 30   # 冲突/CVE/火点/算力
 MACRO_INTERVAL_MIN     = 60   # 宏观指标/论文/恐惧贪婪
 SLOW_INTERVAL_MIN      = 360  # 贸易/人道/难民统计

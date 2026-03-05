@@ -400,6 +400,8 @@ def list_items():
         from datetime import datetime, timedelta, timezone
 
         with get_sync_session() as session:
+            source_id = request.args.get("source_id")
+
             stmt = select(CanonicalItemModel)
             
             if last_24h:
@@ -414,6 +416,9 @@ def list_items():
             
             if sub_domain and sub_domain != "all":
                 stmt = stmt.where(CanonicalItemModel.sub_domain == sub_domain)
+                
+            if source_id:
+                stmt = stmt.where(CanonicalItemModel.source_id == source_id)
 
             if sort_by == "heat":
                 stmt = stmt.order_by(desc(CanonicalItemModel.hotness_score), desc(CanonicalItemModel.crawled_at))
@@ -429,6 +434,10 @@ def list_items():
                     count_stmt = count_stmt.where(CanonicalItemModel.domain.in_(["global", None, ""]))
                 else:
                     count_stmt = count_stmt.where(CanonicalItemModel.domain == domain)
+            if sub_domain and sub_domain != "all":
+                count_stmt = count_stmt.where(CanonicalItemModel.sub_domain == sub_domain)
+            if source_id:
+                count_stmt = count_stmt.where(CanonicalItemModel.source_id == source_id)
             total = session.scalar(count_stmt)
             
             # format timestamps strictly as strings for json
@@ -472,14 +481,14 @@ def get_newsflash():
     domain = request.args.get("domain")
     
     domain_map = {
-        "全球监控": "global",
-        "经济": "economy", 
-        "技术": "technology",
-        "学术": "academic",
-        "娱乐": "entertainment"
+        "全球监控": "global", "global": "global",
+        "经济": "economy", "economy": "economy",
+        "技术": "technology", "technology": "technology",
+        "学术": "academic", "academic": "academic",
+        "娱乐": "entertainment", "entertainment": "entertainment"
     }
-    if domain in domain_map:
-        domain = domain_map[domain]
+    if domain:
+        domain = domain_map.get(domain, domain).lower()
     
     # news_flash_cache is a deque, convert to list to iterate/filter
     cache_list = list(news_flash_cache)
@@ -797,10 +806,14 @@ async def ai_summary():
     """
     生成当前情报摘要，按领域划分。
     """
-    domain = request.args.get("domain")
-    limit_val = int(request.args.get("limit", 40))
+    # Support both JSON body and Query Params
+    json_data = request.get_json(silent=True) or {}
+    domain = json_data.get("domain") or request.args.get("domain")
+    force = json_data.get("force", False) or request.args.get("force", "false").lower() == "true"
+    limit_val = int(json_data.get("limit") or request.args.get("limit", 40))
+    
     if domain and domain != "all":
-        limit_val = max(limit_val, 80)  # 如果是单领域，取更多条目以保证综述深度
+        limit_val = max(limit_val, 80)
     limit = min(limit_val, 150)
     
     # 获取待摘要的内容

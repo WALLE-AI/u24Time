@@ -1,18 +1,13 @@
+import urllib.request
 import json
-from data_alignment.normalizers.academic_normalizer import academic_normalizer
 
-hf = json.load(open("hf.json"))
 try:
-    item = academic_normalizer.normalize_huggingface_paper(hf)
-    print("HF Normalizer output:", type(item), item)
+    res = urllib.request.urlopen('http://127.0.0.1:5001/api/v1/newsflash?domain=economy')
+    print("ECONOMY:")
+    print(json.loads(res.read()))
+    
+    res = urllib.request.urlopen('http://127.0.0.1:5001/api/v1/newsflash?domain=technology')
+    print("\nTECHNOLOGY:")
+    print(json.loads(res.read()))
 except Exception as e:
-    import traceback
-    traceback.print_exc()
-
-poly = json.load(open("poly.json"))
-try:
-    item = academic_normalizer.normalize_polymarket(poly)
-    print("Poly Normalizer output:", type(item), item)
-except Exception as e:
-    import traceback
-    traceback.print_exc()
+    print("Error:", e)
