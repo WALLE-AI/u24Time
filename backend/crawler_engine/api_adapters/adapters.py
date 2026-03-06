@@ -384,26 +384,45 @@ class FeodoAdapter:
 
 class URLhausAdapter:
     """
-    URLhaus API Adapter.
-    文档: https://urlhaus-api.abuse.ch/
+    URLhaus CSV Adapter.
+    文档: https://urlhaus.abuse.ch/api/
     """
 
-    API_URL = "https://urlhaus-api.abuse.ch/v1/urls/recent/"
+    CSV_URL = "https://urlhaus.abuse.ch/downloads/csv_recent/"
 
     @retry(**_RETRY)
     async def fetch_recent(self, limit: int = 100) -> list[dict]:
-        """获取最近报告的恶意 URL"""
+        """获取最近报告的恶意 URL (CSV 格式)"""
         async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, headers=HEADERS) as client:
-            resp = await client.post(
-                self.API_URL,
-                data={"limit": limit},
-                headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded"},
-            )
+            resp = await client.get(self.CSV_URL, follow_redirects=True)
             resp.raise_for_status()
-            data = resp.json()
-            entries = data.get("urls", [])
-            logger.info(f"URLhausAdapter: 获取 {len(entries)} 条恶意 URL")
-            return entries
+
+        rows = []
+        for line in resp.text.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            
+            # 使用 csv 模块正确解析带引号的字段
+            import csv
+            import io
+            reader = csv.reader(io.StringIO(line))
+            parts = next(reader, [])
+            
+            if len(parts) >= 8:
+                rows.append({
+                    "id": parts[0],
+                    "dateadded": parts[1],
+                    "url": parts[2],
+                    "url_status": parts[3],
+                    "threat": parts[4],
+                    "tags": parts[5].split(",") if parts[5] else [],
+                    "urlhaus_link": parts[6],
+                    "reporter": parts[7],
+                })
+
+        logger.info(f"URLhausAdapter: 获取 {len(rows)} 条恶意 URL (CSV)")
+        return rows[:limit]
 
 
 # ══════════════════════════════════════════════════════════════

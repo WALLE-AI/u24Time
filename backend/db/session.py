@@ -38,7 +38,10 @@ if settings.DB_TYPE == "sqlite":
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")   # 比 FULL 快 3x，崩溃安全可接受
+        cursor.execute("PRAGMA wal_autocheckpoint=1000")  # 1000页(~4MB)后自动 checkpoint
+        cursor.execute("PRAGMA cache_size=-64000")    # 64MB 页缓存，减少磁盘 I/O
+        cursor.execute("PRAGMA temp_store=MEMORY")    # 临时表存内存
         cursor.close()
 
 
@@ -86,6 +89,9 @@ if settings.DB_TYPE == "sqlite":
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA wal_autocheckpoint=1000")
+        cursor.execute("PRAGMA cache_size=-64000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
         cursor.close()
 
 

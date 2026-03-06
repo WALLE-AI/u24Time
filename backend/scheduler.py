@@ -204,6 +204,16 @@ class DataScheduler:
                 next_run_time=None,  # 启动时不立即运行，等第一个 interval
             )
 
+        # P1-C: 每 30 分钟执行一次 SQLite WAL checkpoint，防止 WAL 文件无限增长
+        if HAS_APSCHEDULER:
+            self._scheduler.add_job(
+                func=self._checkpoint_db,
+                trigger="interval",
+                minutes=30,
+                id="sqlite_wal_checkpoint",
+                next_run_time=None,
+            )
+
     def _run_sync_wrapper(self, source_id: str):
         """在调度器线程中触发异步采集（通过事件循环提交）"""
         if self._loop and self._loop.is_running():
@@ -214,6 +224,17 @@ class DataScheduler:
                 future.result(timeout=120)  # 120s 超时
             except Exception as e:
                 logger.warning(f"DataScheduler: {source_id} 调度任务异常 → {e}")
+
+    def _checkpoint_db(self):
+        """P1-C: 定期 SQLite WAL checkpoint，防止 WAL 文件 > 25MB 无限增长"""
+        try:
+            from db.session import get_sync_session
+            from sqlalchemy import text
+            with get_sync_session() as session:
+                session.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+                logger.info("DataScheduler: SQLite WAL checkpoint (TRUNCATE) 完成")
+        except Exception as e:
+            logger.warning(f"DataScheduler: WAL checkpoint 失败 → {e}")
 
     async def _crawl(self, source_id: str):
         """
@@ -250,6 +271,8 @@ class DataScheduler:
             self._last_count[source_id] = len(items)
 
             if self._broadcast:
+                # 标准化 domain：确保前端 tab id 和 item domain 一致
+                _ITEM_DOMAIN_ALIAS = {"tech": "technology"}
                 self._broadcast({
                     "event": "scheduler_done",
                     "source_id": source_id,
@@ -261,14 +284,15 @@ class DataScheduler:
                             "item_id": i.item_id,
                             "title": i.title,
                             "url": i.url,
-                            "domain": i.domain or "global",
+                            # 统一 domain 别名（tech → technology），确保前端按 tab 过滤时命中
+                            "domain": _ITEM_DOMAIN_ALIAS.get(i.domain, i.domain) or _domain,
                             "sub_domain": i.sub_domain,
                             "source_id": i.source_id,
                             "crawled_at": i.crawled_at.isoformat() if i.crawled_at else None,
                             "published_at": i.published_at.isoformat() if i.published_at else None,
-                            "hotness_score": i.hotness_score
+                            "hotness_score": i.hotness_score,
                         } for i in items[:20]  # 只传前20条节省带宽
-                    ]
+                    ],
                 })
             logger.info(f"DataScheduler: {source_id} 完成，{len(items)} 条")
 

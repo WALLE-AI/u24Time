@@ -1,4 +1,9 @@
-# u24Time技术报告
+# U24Time Backend 全链路深度分析报告
+
+> 生成时间: 2026-03-06  
+> 分析范围: `data_source/` → `crawler_engine/` → `data_alignment/` → `db/` → `main.py` → Frontend SSE  
+> 源文件总量: 30+ 文件, ~155K bytes 核心代码
+
 ---
 
 ## 目录
@@ -672,4 +677,3 @@ T+1.9s Flask 同步查询 canonical_items WHERE domain='economy' AND sub_domain=
 | 热度衰减系数 λ | 0.035 (半衰期≈20h CRITICAL) | schema.py:262 |
 | LLM 分类批次大小 | 20条/次 | pipeline.py:506 |
 | SQLite 数据库体积 | ~88MB + 25MB WAL | u24time.db |
-

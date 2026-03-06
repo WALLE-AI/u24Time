@@ -111,6 +111,14 @@ function SourceBadge({ status }: { status: string }) {
 
 // ─────────────────────────────────────  Panels
 function NewsFlashPanel({ items, lastRefreshed }: { items: any[], lastRefreshed: Date | null }) {
+  // 1分钟倒计时（配合外部安全轮询间隔）
+  const [countdown, setCountdown] = useState(60);
+  useEffect(() => {
+    setCountdown(60);
+    const t = setInterval(() => setCountdown(c => (c <= 1 ? 60 : c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [lastRefreshed]);  // lastRefreshed 每次刷新后重置
+
   return (
     <PanelBox
       title="今日时讯快报"
@@ -118,9 +126,18 @@ function NewsFlashPanel({ items, lastRefreshed }: { items: any[], lastRefreshed:
       badge="最新推送"
       badgeColor="#ffaa00"
       titleRight={
-        <div style={{ fontSize: 10, color: '#555', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ fontSize: 10, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* 倒计时指示器 */}
+          <span title="距下次自动刷新" style={{
+            display: 'flex', alignItems: 'center', gap: 3,
+            color: countdown <= 10 ? '#ffaa00' : '#444',
+            fontFamily: 'monospace', fontWeight: 700, fontSize: 10, transition: 'color 0.5s'
+          }}>
+            <RefreshCw size={9} style={{ opacity: 0.6 }} />
+            {countdown}s
+          </span>
           <Clock size={10} />
-          {lastRefreshed ? `已于 ${lastRefreshed.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 更新` : '正在同步...'}
+          {lastRefreshed ? `${lastRefreshed.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 更新` : '同步中...'}
         </div>
       }
       style={{ marginBottom: 0 }}
@@ -512,6 +529,9 @@ export default function App() {
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
+  // Debounce ref: prevents rapid SSE events from triggering overlapping HTTP refreshes
+  const hotRefreshDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const addLog = useCallback((entry: Omit<LogEntry, 'id' | 'time'>) => {
     setLogs(prev => [...prev.slice(-120), { ...entry, id: logId.current++, time: now() }]);
   }, []);
@@ -594,6 +614,8 @@ export default function App() {
 
       const url = new URL(`${API_BASE}/api/v1/items`);
       url.searchParams.append('limit', '20');
+      url.searchParams.append('sort', 'heat');       // Always sort by hotness
+      url.searchParams.append('last_24h', 'true');   // Only last 24h for freshness
       if (domain && domain !== 'all') {
         url.searchParams.append('domain', domain);
         if (domain === 'economy' && economySubCategory !== 'all') {
@@ -708,87 +730,100 @@ export default function App() {
   const activeTabForFlashRef = useRef(activeTab);
   useEffect(() => { activeTabForFlashRef.current = activeTab; }, [activeTab]);
 
-  // SSE SSE Connection
+  // SSE Connection with auto-reconnect (exponential backoff)
+  const sseRetryDelay = useRef(1000);   // 初始重连等待 1s
+  const sseRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+
   useEffect(() => {
-    const eventSource = new EventSource(`${API_BASE}/stream`);
+    let destroyed = false;
 
-    eventSource.onopen = () => {
-      setConnected(true);
-      addLog({ level: 'OK', domain: 'SYS', msg: '已建立后端 SSE 连接' });
-    };
+    function connectSSE() {
+      if (destroyed) return;
+      const eventSource = new EventSource(`${API_BASE}/stream`);
+      esRef.current = eventSource;
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.event === 'connected') return;
+      eventSource.onopen = () => {
+        sseRetryDelay.current = 1000; // 重置退避计时
+        setConnected(true);
+        addLog({ level: 'OK', domain: 'SYS', msg: '已建立后端 SSE 连接' });
+      };
 
-        let level: 'INFO' | 'OK' | 'WARN' | 'ERROR' = 'INFO';
-        if (data.event.includes('complete') || data.event.includes('done')) level = 'OK';
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.event === 'connected') return;
 
-        addLog({
-          level,
-          domain: data.domain || data.source_id || data.category || 'SSE',
-          msg: data.event === 'scheduler_done'
-            ? `[${data.domain || data.source_id}] 采集完成 ${data.items_count != null ? data.items_count + ' 条' : ''}`
-            : `收到系统事件: ${data.event}${data.total_items ? ` (总数: ${data.total_items})` : ''}`
-        });
+          let level: 'INFO' | 'OK' | 'WARN' | 'ERROR' = 'INFO';
+          if (data.event.includes('complete') || data.event.includes('done')) level = 'OK';
 
-        if (data.event.includes('task_') || data.event === 'scheduler_done') {
-          fetchTaskCenter();
-        }
-
-        if (data.event === 'scheduler_start' && data.source_id) {
-          setRunningSchedulers(prev => {
-            const next = new Set(prev);
-            next.add(data.source_id);
-            return next;
+          addLog({
+            level,
+            domain: data.domain || data.source_id || data.category || 'SSE',
+            msg: data.event === 'scheduler_done'
+              ? `[${data.domain || data.source_id}] 采集完成 ${data.items_count != null ? data.items_count + ' 条' : ''}`
+              : `收到系统事件: ${data.event}${data.total_items ? ` (总数: ${data.total_items})` : ''}`
           });
-        } else if ((data.event === 'scheduler_done' || data.event === 'scheduler_error') && data.source_id) {
-          setRunningSchedulers(prev => {
-            const next = new Set(prev);
-            next.delete(data.source_id);
-            return next;
-          });
-          if (data.event === 'scheduler_done') {
-            setSchedulerStaleCache(prev => ({
+
+          if (data.event.includes('task_') || data.event === 'scheduler_done') {
+            fetchTaskCenter();
+          }
+
+          if (data.event === 'scheduler_start' && data.source_id) {
+            setRunningSchedulers(prev => {
+              const next = new Set(prev);
+              next.add(data.source_id);
+              return next;
+            });
+          } else if ((data.event === 'scheduler_done' || data.event === 'scheduler_error') && data.source_id) {
+            setRunningSchedulers(prev => {
+              const next = new Set(prev);
+              next.delete(data.source_id);
+              return next;
+            });
+            if (data.event === 'scheduler_done') {
+              setSchedulerStaleCache(prev => ({
+                ...prev,
+                [data.source_id]: {
+                  last_success: data.timestamp,
+                  items_count: data.items_count ?? 0
+                }
+              }));
+            }
+          }
+
+          // 实时更新域活跃度滑动窗口
+          if (data.event === 'scheduler_done' && data.domain) {
+            const eventDomain = data.domain as string;
+            const count = (data.items_count as number) ?? 0;
+            setDomainActivity(prev => {
+              const current = prev[eventDomain] ?? Array(ACTIVITY_WINDOW).fill(0);
+              // 推入新值，移除最旧值
+              const updated = [...current.slice(1), count];
+              return { ...prev, [eventDomain]: updated };
+            });
+            setDomainLastUpdated(prev => ({
               ...prev,
-              [data.source_id]: {
-                last_success: data.timestamp,
-                items_count: data.items_count ?? 0
-              }
+              [eventDomain]: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
             }));
           }
-        }
 
-        // 实时更新域活跃度滑动窗口
-        if (data.event === 'scheduler_done' && data.domain) {
-          const eventDomain = data.domain as string;
-          const count = (data.items_count as number) ?? 0;
-          setDomainActivity(prev => {
-            const current = prev[eventDomain] ?? Array(ACTIVITY_WINDOW).fill(0);
-            // 推入新值，移除最旧值
-            const updated = [...current.slice(1), count];
-            return { ...prev, [eventDomain]: updated };
-          });
-          setDomainLastUpdated(prev => ({
-            ...prev,
-            [eventDomain]: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          }));
-        }
+          // Refresh data on scheduler events
+          if (data.event === 'scheduler_done') {
+            const currentTab = activeTabRef.current;
+            const eventDomain = data.domain as string | undefined;
 
-        // Refresh data on scheduler events
-        if (data.event === 'scheduler_done') {
-          const currentTab = activeTabRef.current;
-          const eventDomain = data.domain as string | undefined;
+            const isMatch = currentTab === 'all' || !eventDomain || eventDomain === currentTab;
 
-          const isMatch = currentTab === 'all' || !eventDomain || eventDomain === currentTab;
-
-          // 【修复】今日时讯快报：0延迟内存流直达，不再走网络请求
-          if (data.items && data.items.length > 0) {
-            // 全球tab，或者特定tab匹配上的，直接插入前端状态
-            if (isMatch) {
+            // 今日时讯快报：优先 SSE 直推，否则 HTTP fallback
+            if (data.items && data.items.length > 0) {
+              // 直接推入最新 items（无论 isMatch，都让后端 newsflash 接口过滤 domain）
               setNewsFlashItems(prev => {
-                const combined = [...data.items, ...prev];
+                const incoming = (data.items as any[]).filter((item: any) =>
+                  currentTab === 'all' || !item.domain || item.domain === currentTab
+                );
+                if (incoming.length === 0) return prev; // 本 tab 没有新数据，保留现有
+                const combined = [...incoming, ...prev];
                 const uniqueMap = new Map();
                 combined.forEach(item => {
                   if (!uniqueMap.has(item.item_id || item.url)) {
@@ -798,34 +833,52 @@ export default function App() {
                 return Array.from(uniqueMap.values()).slice(0, 8);
               });
               setLastRefreshed(new Date());
+            } else {
+              // Fallback: HTTP poll newsflash endpoint
+              fetchNewsFlashRef.current(currentTab !== 'all' ? currentTab : undefined);
             }
-          } else {
-            // Fallback back to fetching
-            fetchNewsFlashRef.current(currentTab !== 'all' ? currentTab : undefined);
-          }
 
-          // 热搜排行：依然走网络请求获取计算后的数据
-          if (isMatch) {
-            fetchDataRef.current(currentTab);
+            // 热搜排行：防抖 debounce，避免多个并发事件相互覆盖
+            if (isMatch) {
+              if (hotRefreshDebounce.current) clearTimeout(hotRefreshDebounce.current);
+              hotRefreshDebounce.current = setTimeout(() => {
+                fetchDataRef.current(currentTab);
+              }, 300); // 300ms debounce
+            }
+          } else if (data.event.includes('complete')) {
+            // Other crawl events (manual API/RSS/hotsearch) also refresh both
+            fetchNewsFlashRef.current(activeTabForFlashRef.current !== 'all' ? activeTabForFlashRef.current : undefined);
+            if (hotRefreshDebounce.current) clearTimeout(hotRefreshDebounce.current);
+            hotRefreshDebounce.current = setTimeout(() => {
+              fetchDataRef.current(activeTabRef.current);
+            }, 300);
           }
-        } else if (data.event.includes('complete')) {
-          // Other crawl events (manual API/RSS/hotsearch) also refresh both
-          fetchNewsFlashRef.current(activeTabForFlashRef.current !== 'all' ? activeTabForFlashRef.current : undefined);
-          fetchDataRef.current(activeTabRef.current);
+        } catch (err) {
+          console.error('Failed to parse SSE message:', err);
         }
-      } catch (err) {
-        console.error('Failed to parse SSE message:', err);
-      }
-    };
+      };
 
-    eventSource.onerror = (err) => {
-      console.error('SSE connection error:', err);
-      setConnected(false);
-      addLog({ level: 'ERROR', domain: 'SYS', msg: '后端 SSE 连接丢失，尝试重连...' });
-    };
+      eventSource.onerror = () => {
+        setConnected(false);
+        eventSource.close();
+        esRef.current = null;
+        if (!destroyed) {
+          const delay = sseRetryDelay.current;
+          addLog({ level: 'WARN', domain: 'SYS', msg: `SSE 断连，${delay / 1000}s 后重试...` });
+          sseRetryTimer.current = setTimeout(() => {
+            sseRetryDelay.current = Math.min(delay * 2, 30000); // 最长 30s
+            connectSSE();
+          }, delay);
+        }
+      };
+    } // end connectSSE
+
+    connectSSE();
 
     return () => {
-      eventSource.close();
+      destroyed = true;
+      if (sseRetryTimer.current) clearTimeout(sseRetryTimer.current);
+      esRef.current?.close();
     };
   }, [addLog]);
 
@@ -834,14 +887,27 @@ export default function App() {
     fetchNewsFlash(activeTab !== 'all' ? activeTab : undefined);
   }, [activeTab, fetchData, fetchNewsFlash]);
 
-  // 2分钟安全网咋轮询——防止 SSE 断连期间错过数据更新
+  // 安全网轮询：每 30s 保底拉新（SSE 断连时的兜底）
   useEffect(() => {
     const timer = setInterval(() => {
       const tab = activeTabForFlashRef.current;
       fetchDataRef.current(tab);
       fetchNewsFlashRef.current(tab !== 'all' ? tab : undefined);
-    }, 2 * 60 * 1000); // 2 minutes
+    }, 30 * 1000); // 30s 轮询，确保数据不超过30s过期
     return () => clearInterval(timer);
+  }, []);
+
+  // Fix 4: 页面从后台切回前台时立即拉取——补偿 SSE 断连期间错过的数据
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const tab = activeTabForFlashRef.current;
+        fetchNewsFlashRef.current(tab !== 'all' ? tab : undefined);
+        fetchDataRef.current(tab);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   useEffect(() => {

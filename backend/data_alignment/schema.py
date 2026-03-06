@@ -134,6 +134,20 @@ class CanonicalItem:
     is_classified: bool = False
     classification_source: str = ""  # "keyword" / "ml" / "llm"
 
+    def __post_init__(self):
+        """确保时间字段始终是 timezone-aware datetime 对象"""
+        if isinstance(self.published_at, str):
+            try:
+                self.published_at = datetime.fromisoformat(self.published_at.replace("Z", "+00:00"))
+            except ValueError:
+                self.published_at = None
+
+        if isinstance(self.crawled_at, str):
+            try:
+                self.crawled_at = datetime.fromisoformat(self.crawled_at.replace("Z", "+00:00"))
+            except ValueError:
+                self.crawled_at = datetime.now(timezone.utc)
+
     def to_dict(self) -> dict:
         """序列化为字典（JSON 友好）"""
         return {

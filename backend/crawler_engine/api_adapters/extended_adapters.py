@@ -396,7 +396,7 @@ class ReliefWebAdapter:
     async def fetch_disasters(self, limit: int = 20, status: str = "ongoing") -> list[dict]:
         """获取进行中的人道主义灾难列表"""
         params = {
-            "appname": "u24time",
+            "appname": "u24time-dev-agent",
             "limit": limit,
             "filter[field]": "status",
             "filter[value]": status,
@@ -414,7 +414,7 @@ class ReliefWebAdapter:
     async def fetch_reports(self, limit: int = 20) -> list[dict]:
         """获取最新人道主义报告"""
         params = {
-            "appname": "u24time",
+            "appname": "u24time-dev-agent",
             "limit": limit,
             "sort[]": "date:desc",
             "profile": "full",
@@ -525,9 +525,15 @@ class SemanticScholarAdapter:
             "sort": "citationCount:desc",  # 简单起见，按引用量排序代表趋势
         }
         async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, headers=HEADERS) as client:
-            resp = await client.get(self.API_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            papers = data.get("data", [])
-            logger.info(f"SemanticScholarAdapter: 获取 {len(papers)} 篇论文 (query={query})")
-            return papers
+            try:
+                resp = await client.get(self.API_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                papers = data.get("data", [])
+                logger.info(f"SemanticScholarAdapter: 获取 {len(papers)} 篇论文 (query={query})")
+                return papers
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    logger.warning(f"SemanticScholarAdapter: 触发速率限制 (429)，跳过本次抓取")
+                    return []
+                raise e

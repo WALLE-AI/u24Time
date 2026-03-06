@@ -67,6 +67,15 @@ class AcademicNormalizer:
             title_lower = title.lower()
             severity = SeverityLevel.MEDIUM if any(t in title_lower for t in hot_terms) else SeverityLevel.INFO
 
+            # Hotness: recency-based. Papers published today = 80-100, yesterday = 60-80, older = fades
+            import math
+            now_dt = _now_dt()
+            age_hours = max(0.0, (now_dt - published.replace(tzinfo=timezone.utc) if published.tzinfo is None else now_dt - published).total_seconds() / 3600)
+            recency_score = max(5.0, 80.0 * math.exp(-age_hours / 48.0))  # half-life ~48h
+            # Boost for AI/hot terms
+            if any(t in title_lower for t in hot_terms):
+                recency_score = min(100.0, recency_score * 1.3)
+
             return CanonicalItem(
                 item_id=_make_id("arxiv", arxiv_id, category),
                 source_id=f"academic.arxiv.{category.lower().replace('.', '_')}",
@@ -80,6 +89,7 @@ class AcademicNormalizer:
                 published_at=published,
                 crawled_at=_now_dt(),
                 severity_level=severity,
+                hotness_score=round(recency_score, 2),
                 raw_metadata={"arxiv_id": arxiv_id, "category": category, "authors": authors},
                 categories=["arxiv", "paper", category.lower()],
                 keywords=authors + [category],
@@ -104,6 +114,11 @@ class AcademicNormalizer:
             if not title:
                 return None
 
+            # Hotness: log-normalized upvotes. 1 vote=5, 10=40, 100=70, 1000=100
+            import math
+            upvotes = int(upvotes or 0)
+            hotness = min(100.0, max(5.0, 20.0 * math.log1p(upvotes + 1)))
+
             # HF papers always AI-related → MEDIUM
             return CanonicalItem(
                 item_id=_make_id("hf_paper", paper_id, title[:20]),
@@ -117,6 +132,7 @@ class AcademicNormalizer:
                 published_at=published,
                 crawled_at=_now_dt(),
                 severity_level=SeverityLevel.MEDIUM,
+                hotness_score=round(hotness, 2),
                 raw_engagement={"comments": upvotes},
                 raw_metadata={"hf_id": paper_id},
                 categories=["huggingface", "ai", "paper"],
@@ -142,6 +158,11 @@ class AcademicNormalizer:
             if not title:
                 return None
 
+            # Hotness: log-normalized citation count. 0=5, 10=30, 100=55, 1000=85, 10000=100
+            import math
+            citations = int(citation_count or 0)
+            hotness = min(100.0, max(5.0, 15.0 * math.log1p(citations + 1)))
+
             return CanonicalItem(
                 item_id=_make_id("ss_paper", paper_id, title[:20]),
                 source_id="academic.semantic_scholar.trending",
@@ -155,6 +176,7 @@ class AcademicNormalizer:
                 published_at=published,
                 crawled_at=_now_dt(),
                 severity_level=SeverityLevel.INFO,
+                hotness_score=round(hotness, 2),
                 raw_engagement={"citations": citation_count},
                 raw_metadata={"ss_id": paper_id},
                 categories=["semanticscholar", "paper"],

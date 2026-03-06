@@ -55,16 +55,23 @@ _scheduler = DataScheduler(
 )
 
 
-# ─── SSE 支持 ─────────────────────────────────────────────────
+# 高优先级事件：必须投递，Queue.Full 才踢客户端
+_HIGH_PRIORITY_EVENTS = {"scheduler_done", "connected", "health_check_done", "full_crawl_complete"}
 
 def _broadcast(event: dict):
-    """向所有 SSE 客户端广播消息"""
+    """向所有 SSE 客户端广播消息（P1-B: 分级投递，防止 Queue.Full 误踢客户端）"""
+    event_type = event.get("event", "")
     with _sse_lock:
         dead: list[queue.Queue] = []
         for q in _sse_clients:
             try:
-                q.put_nowait(event)
+                if event_type in _HIGH_PRIORITY_EVENTS:
+                    q.put_nowait(event)          # 重要事件：必须投递
+                else:
+                    if not q.full():             # 低优先级：满了直接丢弃，不踢客户端
+                        q.put_nowait(event)
             except queue.Full:
+                # 只有高优先级事件 Full 才认为客户端真的死了
                 dead.append(q)
         for q in dead:
             _sse_clients.remove(q)
@@ -77,7 +84,7 @@ def _format_sse(data: dict) -> str:
 @app.route("/stream")
 def sse_stream():
     """SSE 事件流端点"""
-    client_q: queue.Queue = queue.Queue(maxsize=50)
+    client_q: queue.Queue = queue.Queue(maxsize=200)  # P1-B: 50 → 200，减少背压丢包
     with _sse_lock:
         _sse_clients.append(client_q)
 

@@ -392,36 +392,9 @@ class AlignmentPipeline:
     ) -> list[CanonicalItem]:
         """
         对齐数据并异步写入数据库（如果提供了 db_session）。
+        P1-A: 内存写入迟到 DB flush 成功后，确保内存与 DB 强一致。
         """
         items = self.align(source_id, raw_data, meta)
-
-        # ── 内存直传：无论 DB 写入结果如何，先把最新数据推入 NewsFlash Deque ──
-        # 关键修复：必须在任何 DB 早期返回 (return) 之前执行，否则当所有条目已存在 DB 时
-        # 会走 `if not new_items: return items` 跳过这里，导致 deque 永远不更新。
-        from memory_cache import news_flash_cache
-        for item in reversed(items):
-            item_dict = {
-                "item_id": item.item_id,
-                "title": item.title,
-                "url": item.url,
-                "domain": item.domain or "global",
-                "sub_domain": item.sub_domain,
-                "source_id": item.source_id,
-                "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
-                "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
-                "hotness_score": item.hotness_score
-            }
-            # 队列内去重：先删旧版本，再置顶最新版本（保证价格/热度实时更新）
-            cache_list = list(news_flash_cache)
-            for old in cache_list:
-                if old["item_id"] == item.item_id:
-                    try:
-                        news_flash_cache.remove(old)
-                    except ValueError:
-                        pass
-                    break
-            news_flash_cache.appendleft(item_dict)
-        # ────────────────────────────────────────────────────────────────
 
         if db_session is not None and items:
             from sqlalchemy import select, update
@@ -476,9 +449,10 @@ class AlignmentPipeline:
 
                     logger.info(f"AlignmentPipeline: 更新 {len(existing_items)} 条已有记录 crawled_at source={source_id}")
 
-                # 无新条目——直接 flush 后返回（cache 已在上方更新）
+                # 无新条目——flush 后写内存返回
                 if not new_items:
                     await db_session.flush()
+                    self._update_news_flash_cache(items)  # P1-A: flush 成功后写内存
                     return items
 
                 # === LLM 领域分类（仅对确实没有已知 domain 的全新条目）===
@@ -554,12 +528,50 @@ class AlignmentPipeline:
                     )
                     db_session.add(model)
 
+                # P1-A: 先 flush DB，成功后再写内存——确保内存与 DB 强一致
                 await db_session.flush()
+                self._update_news_flash_cache(items)  # ← flush 成功后才进内存
                 logger.info(f"AlignmentPipeline: 写入 {len(new_items)} 条新条目到 DB source={source_id}")
             except Exception as e:
                 logger.error(f"AlignmentPipeline: DB 写入失败 source={source_id} err={e}")
                 await db_session.rollback()
+                # P1-A: DB 回滚时不写内存，避免脏数据
                 raise
+
+        else:
+            # 无 DB session（离线模式）直接写内存
+            self._update_news_flash_cache(items)
 
         return items
 
+    def _update_news_flash_cache(self, items: list[CanonicalItem]):
+        """
+        P1-A: 统一内存缓存写入方法。
+        包含 domain 标准化（tech→technology）和队内去重，确保与 newsflash 端点过滤逻辑一致。
+        """
+        from memory_cache import news_flash_cache
+        _DOMAIN_ALIAS = {"tech": "technology"}
+
+        for item in reversed(items):
+            normalized_domain = _DOMAIN_ALIAS.get(item.domain, item.domain) or "global"
+            item_dict = {
+                "item_id": item.item_id,
+                "title": item.title,
+                "url": item.url,
+                "domain": normalized_domain,
+                "sub_domain": item.sub_domain,
+                "source_id": item.source_id,
+                "crawled_at": item.crawled_at.isoformat() if hasattr(item.crawled_at, 'isoformat') else str(item.crawled_at) if item.crawled_at else None,
+                "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at) if item.published_at else None,
+                "hotness_score": item.hotness_score,
+            }
+            # 队内去重：先删旧版本，再置顶最新版本
+            cache_list = list(news_flash_cache)
+            for old in cache_list:
+                if old["item_id"] == item.item_id:
+                    try:
+                        news_flash_cache.remove(old)
+                    except ValueError:
+                        pass
+                    break
+            news_flash_cache.appendleft(item_dict)
