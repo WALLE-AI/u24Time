@@ -106,6 +106,9 @@ class Settings(BaseSettings):
         description="NewsNow 聚合热搜 API 基础 URL（BettaFish MindSpider）",
     )
 
+    # ─── 扩展 API ──────────────────────────────────────────────
+    SEARCH_API_KEY: Optional[str] = Field(None, description="SerpAPI/Tavily API Key（QueryAgent 外部搜索）")
+    SEARCH_API_PROVIDER: str = Field("tavily", description="tavily/serpapi/duckduckgo")
 
 
 # 全局配置实例

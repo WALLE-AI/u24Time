@@ -178,3 +178,39 @@ class DataSourceHealthModel(Base):
         Index("ix_health_source_id", "source_id"),
         Index("ix_health_checked_at", "checked_at"),
     )
+
+
+class AgentsTopicModel(Base):
+    """BroadTopicExtraction 话题关键词"""
+    __tablename__ = "agents_topics"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    keyword: Mapped[str] = mapped_column(String(255), nullable=False, comment="提取的关键词")
+    crawl_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, comment="抓取日期")
+    rank: Mapped[int] = mapped_column(Integer, default=0, comment="热度排名")
+    source: Mapped[str] = mapped_column(String(64), default="hotsearch_aggregate", comment="话题来源")
+    
+    __table_args__ = (
+        Index("ix_agents_topic_keyword", "keyword"),
+        Index("ix_agents_topic_date", "crawl_date"),
+    )
+
+
+class AgentsSessionModel(Base):
+    """Agent 分析会话"""
+    __tablename__ = "agents_sessions"
+    
+    session_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="UUID Session ID")
+    pipeline_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="bettafish / mirofish")
+    query: Mapped[str] = mapped_column(Text, nullable=False, comment="查询目标词或文本")
+    status: Mapped[str] = mapped_column(String(32), default="pending", comment="pending/running/done/failed")
+    config_json: Mapped[str] = mapped_column(Text, default="{}", comment="运行配置项 (JSON)")
+    result_json: Mapped[str] = mapped_column(Text, default="{}", comment="分析结果字典 (JSON)")
+    forum_log: Mapped[str] = mapped_column(Text, default="[]", comment="JSON 序列化的 forum 消息列表")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_agents_session_status", "status"),
+        Index("ix_agents_session_type", "pipeline_type"),
+    )
