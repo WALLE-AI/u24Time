@@ -168,7 +168,7 @@ class DataScheduler:
 
         if HAS_APSCHEDULER:
             self._scheduler = BackgroundScheduler(
-                executors={"default": ThreadPoolExecutor(max_workers=4)},
+                executors={"default": ThreadPoolExecutor(max_workers=8)},
                 job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 60},
             )
 
@@ -201,7 +201,8 @@ class DataScheduler:
                 minutes=interval_min,
                 id=f"crawl_{source_id.replace('.', '_')}",
                 args=[source_id],
-                next_run_time=None,  # 启动时不立即运行，等第一个 interval
+                # next_run_time 省略 → APScheduler 默认正常调度（不再是 paused）
+                # 注意: trigger_all_now() 在 start() 中已触发一次全量立即采集
             )
 
         # P1-C: 每 30 分钟执行一次 SQLite WAL checkpoint，防止 WAL 文件无限增长
@@ -211,7 +212,6 @@ class DataScheduler:
                 trigger="interval",
                 minutes=30,
                 id="sqlite_wal_checkpoint",
-                next_run_time=None,
             )
 
     def _run_sync_wrapper(self, source_id: str):

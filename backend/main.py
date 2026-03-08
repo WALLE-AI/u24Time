@@ -373,7 +373,41 @@ def crawl_hotsearch():
 
 @app.route("/api/v1/crawl/tasks")
 def crawl_tasks():
-    """返回最近 50 条爬虫任务记录"""
+    """返回最近 100 条爬虫任务记录（优先从 DB 读取，内存兜底）"""
+    try:
+        from db.session import get_sync_session
+        from db.models import CrawlTaskModel
+        from sqlalchemy import select, desc
+
+        def _iso(dt):
+            if not dt: return None
+            from datetime import timezone
+            return dt.replace(tzinfo=timezone.utc).isoformat() if dt.tzinfo is None else dt.isoformat()
+
+        with get_sync_session() as session:
+            stmt = (
+                select(CrawlTaskModel)
+                .order_by(desc(CrawlTaskModel.started_at))
+                .limit(100)
+            )
+            rows = session.scalars(stmt).all()
+            if rows:
+                return ok(data=[{
+                    "task_id": r.task_id,
+                    "task_type": r.task_type,
+                    "source_id": r.source_id,
+                    "source_ids": [r.source_id],
+                    "status": r.status,
+                    "items_fetched": r.items_fetched,
+                    "items_aligned": r.items_aligned,
+                    "error_message": r.error_message,
+                    "started_at": _iso(r.started_at),
+                    "finished_at": _iso(r.finished_at),
+                } for r in rows])
+    except Exception as e:
+        logger.warning(f"DB query for crawl_tasks failed, falling back to memory: {e}")
+
+    # 内存兜底（重启前的任务 or DB 不可用时）
     return ok(data=_engine.list_tasks())
 
 
