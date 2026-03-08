@@ -1,75 +1,156 @@
-# 端到端智能体预测架构闭环实施方案
-**整合目标**: 融合 `BettaFish`(微舆)、`MiroFish`(预测沙盒) 和 `OpenClaw`(个人AI核心) 三大开源项目核心技术，在当前 `backend/agents` 模块下构建一条完全自动化、端到端 (End-to-End) 的多智能体情报预测流水线。
+# 端对端多智能体情报预测架构方案
+> 基于 BettaFish + MiroFish + OpenClaw 三方项目源码深度分析（源码级）
+> 更新时间: 2026-03-08
 
 ---
 
-## 架构核心要素分析 (基于三大开源项目)
+## 一、三大项目核心技术地图
 
-### 1. 整体智能体架构设计
-*   **网关控制 (Gateway)**: 借鉴 OpenClaw 控制面，利用 FastAPI 的 WebSocket 和 SSE 构建双向通信网关，所有的客户端终端获取实时状态。
-*   **Pi-Agent 运行时分级编排**:
-    *   **主控 Agent (Gateway/Orchestrator)**: 负责心跳维护、任务调度、子 Agent 生命周期管理。
-    *   **领域子 Agent (Subagents)**: QueryAgent, MediaAgent, InsightAgent, ReportAgent 作为并行的 RPC/Worker 运行，受限于主控的并发树与深度限制。
+### 1.1 BettaFish — 舆情分析管线核心技术
 
-### 2. 心跳与调度任务技术 (Heartbeat)
-*   借鉴 OpenClaw 的 `cron` / `service` 背景任务调度：
-    *   实现一个长驻 `Background Task Scheduler`，负责按规律 (比如每6小时) 自动触发全景扫描。
-    *   具备防挂死 (Loop Detection)、任务状态防重入机制。
+| 模块 | 核心文件 | 关键实现细节 |
+| :--- | :--- | :--- |
+| **ForumEngine** | `monitor.py` / `llm_host.py` | `LogMonitor` 1秒轮询 3 个 `.log` 文件；每采集到 **5 条** Agent 发言触发 `ForumHost`(Qwen-235B 模型) 引导总结；`threading.Lock` 保证并发安全写入 `forum.log` |
+| **InsightEngine** | `agent.py` (40KB) | `search_hot_content/search_topic_globally/get_comments_for_topic` 等 5 大工具；UNION ALL 跨 15 张表；加权热度: **Like×1 + Comment×5 + Share×10 + View×0.1** |
+| **QueryEngine** | `nodes/` | SearchNode → FormattingNode → **ReflectionSummaryNode**(max 2轮) → FirstSummaryNode → SummaryNode；`max_search_results=15` |
+| **SentimentAnalyzer** | `SentimentAnalysisModel/` | 默认 `tabularisai/multilingual-sentiment-analysis`(22语言，5级分类：0非常负面～4非常正面)；批量输出情感分布/置信度 |
+| **ReportEngine** | `ReportEngine/` | 模板选择 → 布局设计 → 字数预算 → 逐章生成 → JSON校验 → 装订 → HTML/PDF/MD |
 
-### 3. 上下文与记忆管理
-*   **短期上下文引擎 (Context Engine)**: 维持正在执行中会话的生命周期。提供分块与修复机制，处理多智能体 Forum 协作时产生的长尾对话与幻听错误。
-*   **长效记忆池 (SQLite-Vec / Zep)**: 单个分析结果的长期沉淀 (结合 BettaFish 的关系日志，模拟 OpenClaw 的 Sqlite-vec Memory Search，辅以 Zep 的外部时序节点存储)，使下一次的同题分析拥有*先验认知*。
+### 1.2 MiroFish — 图谱仿真预测核心技术
 
-### 4. 数据获取与对齐管道 (Data Acquisition & Alignment)
-*   **感知获取**: `TopicExtractor` 主题侦查 -> `SocialCrawler` 抓取 (爬虫阶段由任务调度器触发)。
-*   **标准化对齐**: `MediaCrawlerDB`  facade 执行映射，将跨平台异构数据洗为 `canonical_items` 存入。
+| 模块 | 关键实现细节 |
+| :--- | :--- |
+| **OntologyGenerator** | temperature=0.3；精确 10 实体 + 6-10 关系；最后 2 个必须是 Person/Organization；禁用 Zep 保留字 |
+| **GraphBuilderService** | Zep Cloud；chunk_size=500 overlap=50；batch_size=3；轮询 episode.processed (超时 600s) |
+| **SimulationRunner** | OASIS 双平台并行 (Twitter + Reddit)；默认 **144 轮**（72虚拟小时）；Agent行为实时写入图谱时序边 |
+| **ReportAgent** | 99KB 核心文件；图谱查询 + 与模拟 Agent 深度对话 + 生成预测报告 |
+| **ZepTools** | 实体检索/关系路径查询/时序事实查询/Agent记忆读取 |
 
-### 5. 渠道推送分发 (Channel Tech)
-*   分析结束后产出的 Markdown 报告或者预测预警，借助 OpenClaw 风格的多渠道 webhook 发往宿主指定渠道（如 Telegram, 内线通知）。
+### 1.3 OpenClaw — 智能体运行时核心技术
+
+| 技术域 | 核心文件 | 关键实现细节 |
+| :--- | :--- | :--- |
+| **ContextEngine (接口)** | `context-engine/types.ts` | `bootstrap/ingest/ingestBatch/afterTurn/assemble/compact/prepareSubagentSpawn/onSubagentEnded`；`isHeartbeat` 标志区分心跳与常规 Turn |
+| **记忆管理** | `memory/manager.ts` | `MemoryIndexManager`：SQLite + sqlite-vec + BM25 FTS 混合检索；多嵌入模型自动 fallback；`search()` 实现 Vector+Keyword+MMR+时序衰减 |
+| **子智能体注册表** | `agents/subagent-registry.ts` | 完整生命周期；指数退避重试 (1s→2s→4s→8s)；Sweeper 每 60s 清档；`archiveAfterMinutes` 控制超时；孤儿检测/清理 |
+| **心跳调度** | `cron/heartbeat-policy.ts` | `shouldSkipHeartbeatOnlyDelivery()` 抑制纯心跳输出；`shouldEnqueueCronMainSummary()` 控制任务汇报 |
+| **渠道网关** | `channels/` | `registry.ts` 统一注册；`dock.ts` 双向调度；`draft-stream-loop.ts` SSE 流式；`inbound-debounce-policy.ts` 防抖；支持 Telegram/Slack/Discord 等 |
 
 ---
 
-## E2E 工作流水线设计 (The Core Loop)
+## 二、E2E 整合架构设计
 
-流水线将从传统的被动 HTTP API 触发，升级为**事件/心跳自动驱动**的闭环。
+### 2.1 五层架构模型
 
-```mermaid
-graph TD
-    Cron[调度与心跳引擎<br>(OpenClaw Scheduler)] -->|1. 定时触发| ACQ[感知监控层<br>(TopicExtractor+Crawler)]
-    ACQ -->|2. 元数据入库| ALIGN[数据对齐与度量计算<br>(MediaCrawlerDB + Hotness)]
-    ALIGN -->|阈值判定| EVENT[事件与舆情分析<br>- Query/Insight/Media<br>- 情感计算分析]
-    EVENT <-->|3. 多轮反思/Forum协作| F[Forum 共享脑区<br>Context Engine]
-    EVENT -->|4. 主题确立/快报| SELECT[智能选题与快报<br>(ReportAgent)]
-    SELECT -->|5. 本体提纯| GRAPH[图谱重建<br>(Zep Ontology)]
-    GRAPH -->|6. 沙盒加载| SIM[OASIS 多智能体双平台仿真<br>预测推演 144 轮]
-    SIM -->|7. 局势研判| PREDICT[决断预判<br>(PredictionReportAgent)]
-    PREDICT -->|8. 写成长时记忆| MEM[Sqlite-Vec/Zep 长期记忆]
-    PREDICT -->|9. 多渠道推送| CH[Channel Gateway 分发]
+```
+┌──────────────────────────────────────────────────────────────┐
+│  LAYER 5: 渠道网关层 (Channel Gateway)                        │
+│  FastAPI WS + SSE 双向网关 + Webhook 外部推送 + 前端 UI 推送   │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────────┐
+│  LAYER 4: 心跳与调度层 (Heartbeat & Scheduler)                 │
+│  APScheduler AsyncIO；防重入锁；指数退避重试；Sweeper 清档       │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ 触发
+┌────────────────────────────▼─────────────────────────────────┐
+│  LAYER 3: 多智能体协作层 (Multi-Agent Coordination)            │
+│  CrawlerAgent → InsightAgent → QueryAgent ──┐                │
+│  MediaAgent → SentimentAgent               ForumHost(每5条)  │
+│  OntologyAgent → GraphAgent → SimulationAgent → PredictAgent │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────────┐
+│  LAYER 2: 上下文与记忆层 (Context & Memory)                    │
+│  ContextEngine (bootstrap/ingest/compact/assemble)           │
+│  SQLite-Vec Hybrid Memory + Zep Cloud 时序图谱               │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────────┐
+│  LAYER 1: 数据基础层 (Data Foundation)                         │
+│  7平台×14表 + canonical_items + daily_topics + Vector DB      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 E2E 完整数据流
+
+```
+[心跳调度] ──定时触发──▶
+  Phase 0  TopicExtractor (BroadTopicExtraction) + SocialCrawler (7平台×14表)
+  Phase 1  MediaCrawlerDB 5大查询工具 + 加权热度 → HotnessThreshold 判定
+  Phase 2  QueryAgent/InsightAgent/MediaAgent 并行分析
+           ↕ ForumHost (每5条发言 → Qwen LLM 引导 → forum.log)
+  Phase 3  SentimentAgent (22语言，5级) 批量情感标注
+  Phase 4  智能选题 (热度×情感×事件权重) → ReportEngine 初始快报
+  Phase 5  OntologyGenerator (10实体+6-10关系) + GraphBuilder → Zep Cloud
+  Phase 6  OasisProfileGenerator → SimulationRunner (144轮双平台) → ZepMemoryUpdate
+  Phase 7  PredictionReportAgent (图谱查询+Agent对话+预测报告)
+           → 写入 SQLite-Vec 长期记忆 → Channel Gateway 多渠道分发
 ```
 
 ---
 
-## 分阶段执行方案 (Execution Plan)
+## 三、核心技术对应设计
 
-目前我们已经在 `backend/agents` 下完成了 BettaFish API 路由的搭建以及 FastAPI 的初始化，下一步是将其串联和升级。
+### 3.1 上下文管理
+- 每个 Pipeline Run 维护独立 `sessionId`，实现 `bootstrap(先验记忆注入) / ingest(消息追加) / compact(Token裁减)`
+- `isHeartbeat=True` 区分定时触发与手动触发，心跳结果不直接推送给用户
 
-### **Phase 1: 基础设施建设 - 心跳引擎与记忆库引入**
-*   **组件开发**:
-    *   `backend/agents/scheduler.py`: 引入 `APScheduler` 或 asyncio 任务队列，模拟 OpenClaw 的 background cron 触发机制。
-    *   `backend/agents/memory.py`: 构建与长期图谱交火的中间记忆区接口。
-*   **目标验证**: 启动服务后，心跳系统能够独立运行，并定时发起 Dummy 探测任务。
+### 3.2 记忆管理
+- **短期**: `AgentsSessionModel` 存中间结果
+- **长期 (历史检索)**: SQLite + sqlite-vec，BM25+向量混合检索历史分析报告
+- **图谱记忆**: Zep Cloud 时序图谱，`valid_at/invalid_at` 建模知识有效期
 
-### **Phase 2: 搭建 E2E 主控管线 (Orchestrator)**
-*   **组件开发**:
-    *   `backend/agents/pipeline/e2e_coordinator.py`: 这是全图的核心。它侦听前序执行结果的信号，把现有的 BettaFish Pipeline (P0-P3, 分析) 的输出结果作为输入，直接自动传送给 MiroFish Pipeline (P4-P5, 重构图谱与沙盒演练)。
-*   **事件打通**:
-    *   实现当舆情热度 `HotnessCalculator` 的结果超出阈值时，自动决定当前话题作为核心选题。
+### 3.3 心跳技术
+- `APScheduler`，AsyncIO 模式，间隔 6 小时（可配置）
+- 防重入 `asyncio.Lock`，同一话题不并发执行
+- 子任务失败用指数退避（1s→2s→4s→8s），最多 3 次重试
 
-### **Phase 3: 渠道融合与 Gateway 完善**
-*   **组件开发**:
-    *   丰富 FastAPI Websocket 网关层，向前端 UI 实况推送 E2E 进度（包括子智能体现正处理的任务、Zep 图谱更新数）。
-    *   实现最终预测结果（Prediction Report）的外部 Webhook/File 落盘。
+### 3.4 渠道技术
+- **内部流**: FastAPI SSE `/agents/stream/{run_id}` 实时推送进度
+- **外部推送**: `ChannelDispatcher` 抽象 Webhook，支持 Telegram/企业微信
+- **防抖**: 短时间多次触发仅执行最后一次
 
-### **Phase 4: 全链路系统集成与健壮性回归**
-*   **调优与错误截获**: 利用上下文修复策略，容阻中间 API (Zep, 搜索引擎) 的调用失败自动回退。
-*   进行模拟触发测试：从“爬取”一键走到“最终预测书”。
+---
+
+## 四、分阶段执行方案
+
+> **现有基础**: `backend/agents` 已有 BettaFish P0-P3 Routers + MiroFish P4-P5 框架
+
+### Phase 1 — 基础设施层 (预计 2-3 天)
+| 新建文件 | 功能 |
+| :--- | :--- |
+| `backend/agents/scheduler.py` | APScheduler 心跳调度引擎 |
+| `backend/agents/memory.py` | SQLite-Vec + Zep 长效记忆连接器 |
+| `backend/agents/context_engine.py` | 会话上下文生命周期管理 |
+
+### Phase 2 — E2E 主控协调器 (预计 3-4 天)
+| 新建文件 | 功能 |
+| :--- | :--- |
+| `backend/agents/pipeline/e2e_coordinator.py` | E2E 9 阶段主控调度器 |
+| `backend/agents/subagent_registry.py` | 子智能体生命周期注册表 |
+
+### Phase 3 — 渠道网关层 (预计 1-2 天)
+| 新建文件 | 功能 |
+| :--- | :--- |
+| `backend/agents/channel_dispatcher.py` | 多渠道 Webhook 分发 |
+| `backend/agents/server.py` (更新) | 新增 WebSocket endpoint |
+
+### Phase 4 — 系统联调 (预计 2 天)
+- 全链路 E2E 压力测试
+- 异常恢复测试（Zep超时、OASIS崩溃）
+- 记忆先验偏置验证（同话题第二次运行引用历史）
+
+---
+
+## 五、关键设计决策
+
+| 决策 | 选择 | 理由 |
+| :--- | :--- | :--- |
+| 调度框架 | `APScheduler (AsyncIO)` | 与 FastAPI 生命周期无缝集成 |
+| 向量存储 | `SQLite + sqlite-vec` | 参考 OpenClaw，轻量无外部依赖 |
+| 图谱存储 | `Zep Cloud` | 时序边支持，适合舆情演化建模 |
+| Agent 通信 | `asyncio.Queue + Forum.log 机制` | 参考 BettaFish，异步化改造 |
+| 心跳间隔 | 6小时（可配置） | 覆盖热点周期，避免过频触发平台封禁 |
+
+> ⚠️ **风险**: Zep Cloud API 限速 & OASIS 单机内存瓶颈，建议 `max_agents=50` + `timeout=600s`
