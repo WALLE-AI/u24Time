@@ -3,7 +3,7 @@ import {
   Shield, Globe, Activity, Cpu, Terminal, TrendingUp,
   BarChart2, Radio, Wifi, WifiOff, RefreshCw, Zap,
   AlertTriangle, ChevronRight, Sparkles, BookOpen, DollarSign, X,
-  ListTodo, Clock, CheckCircle2, CircleDashed, Loader2
+  ListTodo, Clock, CheckCircle2, CircleDashed, Loader2, BrainCircuit
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -40,6 +40,8 @@ interface SchedulerJob {
   next_run: string | null;
   interval_min: number;
 }
+import AgentView from './AgentView';
+
 const DOMAIN_TABS = [
   { id: 'all', label: '全览', icon: Globe },
   { id: 'global', label: '全球监控', icon: Shield },
@@ -47,6 +49,7 @@ const DOMAIN_TABS = [
   { id: 'technology', label: '技术', icon: Cpu },
   { id: 'academic', label: '学术', icon: BookOpen },
   { id: 'entertainment', label: '娱乐', icon: Sparkles },
+  { id: 'agent', label: '智能推演', icon: BrainCircuit },
 ];
 
 const DOMAIN_STATS_FALLBACK: StatItem[] = [
@@ -969,230 +972,237 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', gap: 0, overflow: 'hidden' }}>
 
         {/* ── Main content ── */}
-        <main style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column', gap: 20, overflow: 'auto' }}>
+        {activeTab === 'agent' ? (
+          <main style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column', gap: 20, overflow: 'auto' }}>
+            <AgentView />
+          </main>
+        ) : (
+          <main style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column', gap: 20, overflow: 'auto' }}>
 
-          <AISummaryPanel
-            key={activeTab}
-            summary={aiSummary}
-            loading={isSummarizing}
-            onRefresh={() => fetchSummary(activeTab, true)}
-          />
+            <AISummaryPanel
+              key={activeTab}
+              summary={aiSummary}
+              loading={isSummarizing}
+              onRefresh={() => fetchSummary(activeTab, true)}
+            />
 
-          <StatBar stats={domainStats.length > 0 ? domainStats : DOMAIN_STATS_FALLBACK} />
+            <StatBar stats={domainStats.length > 0 ? domainStats : DOMAIN_STATS_FALLBACK} />
 
-          <NewsFlashPanel items={newsFlashItems} lastRefreshed={lastRefreshed} />
+            <NewsFlashPanel items={newsFlashItems} lastRefreshed={lastRefreshed} />
 
-          {/* Main content grid - Now single column for focus */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <PanelBox
-              title={activeTab === 'economy' ? "经济动态排名" : "热搜排行"}
-              icon={<TrendingUp size={14} />}
-              badge="实时 (SSE 推送)"
-              count={hotItems.length}
-              style={{ minHeight: 480 }}
-              actions={(
-                <>
-                  {activeTab === 'economy' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
-                      <select
-                        value={economySubCategory}
-                        onChange={(e) => setEconomySubCategory(e.target.value)}
-                        style={{
-                          background: '#1a1a1a',
-                          color: '#fff',
-                          border: '1px solid #333',
-                          fontSize: 11,
-                          padding: '2px 6px',
-                          borderRadius: 2,
-                          cursor: 'pointer',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="all">全部动态</option>
-                        <option value="stock">股市/全球指数</option>
-                        <option value="finance">实时财经快讯</option>
-                        <option value="crypto">加密货币价格</option>
-                        <option value="futures">黄金/有色金属/大宗</option>
-                        <option value="quant">市场情绪/量化</option>
-                      </select>
-                    </div>
-                  )}
-                  {activeTab === 'technology' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
-                      <select
-                        value={techSubCategory}
-                        onChange={(e) => setTechSubCategory(e.target.value)}
-                        style={{
-                          background: '#1a1a1a',
-                          color: '#fff',
-                          border: '1px solid #333',
-                          fontSize: 11,
-                          padding: '2px 6px',
-                          borderRadius: 2,
-                          cursor: 'pointer',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="all">全部动态</option>
-                        <option value="oss">GitHub 项目趋势</option>
-                        <option value="tech_news">技术社区 & 新闻</option>
-                        <option value="ai_model">AI 模型更新</option>
-                        <option value="ai_dataset">AI 数据集更新</option>
-                        <option value="cyber">网络安全威胁</option>
-                        <option value="infra">基础设施状态</option>
-                      </select>
-                    </div>
-                  )}
-                  {activeTab === 'academic' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
-                      <select
-                        value={academicSubCategory}
-                        onChange={(e) => setAcademicSubCategory(e.target.value)}
-                        style={{
-                          background: '#1a1a1a',
-                          color: '#fff',
-                          border: '1px solid #333',
-                          fontSize: 11,
-                          padding: '2px 6px',
-                          borderRadius: 2,
-                          cursor: 'pointer',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="all">全部动态</option>
-                        <option value="paper">学术论文 (arXiv / HF / S2)</option>
-                        <option value="conference">学术会议</option>
-                        <option value="prediction">预测市场</option>
-                      </select>
-                    </div>
-                  )}
-                </>
-              )}
-            >
-              <HotPanelItems items={hotItems.length > 0 ? hotItems : []} />
-            </PanelBox>
-          </div>
-
-          {/* Sparkline / Activity row — 实时域活跃度 + 地区分布 */}
-          {(() => {
-            const DOMAIN_DEFS = [
-              { id: 'global', label: '地缘', color: '#ff5c00' },
-              { id: 'economy', label: '经济', color: '#3357FF' },
-              { id: 'technology', label: '科技', color: '#33FF57' },
-              { id: 'academic', label: '学术', color: '#c084fc' },
-            ];
-            // 地区颜色 & 标签
-            const GEO_COLOR: Record<string, string> = {
-              CN: '#f87171',   // 中国 · 红
-              US: '#60a5fa',   // 美国 · 蓝
-              Global: '#34d399', // 全球 · 绿
-              Other: '#fbbf24',  // 其他 · 黄
-            };
-            const GEO_LABEL: Record<string, string> = {
-              CN: '🇨🇳', US: '🇺🇸', Global: '🌐', Other: '…',
-            };
-
-            const allValues = DOMAIN_DEFS.flatMap(d => domainActivity[d.id] ?? []);
-            const globalMax = Math.max(...allValues, 1);
-            const toHeight = (v: number) => Math.max(5, Math.round((v / globalMax) * 90));
-
-            return (
+            {/* Main content grid - Now single column for focus */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <PanelBox
-                title="域活跃度"
-                icon={<BarChart2 size={14} />}
-                badge="实时"
-                badgeColor="#34d399"
-                style={{ minHeight: 160, flexShrink: 0 }}
-              >
-                <div style={{ display: 'flex', gap: 12, paddingTop: 6 }}>
-                  {DOMAIN_DEFS.map(({ id, label, color }) => {
-                    const bars = domainActivity[id] ?? Array(ACTIVITY_WINDOW).fill(0);
-                    const lastTime = domainLastUpdated[id];
-                    const isActive = bars[bars.length - 1] > 0;
-                    const geo = domainGeoDistribution[id] ?? {};
-                    const geoTotal = Object.values(geo).reduce((a, b) => a + b, 0) || 1;
-
-                    // 地区条带的顺序：CN > US > Global > Other
-                    const geoOrder = ['CN', 'US', 'Global', 'Other', ...Object.keys(geo).filter(k => !['CN', 'US', 'Global', 'Other'].includes(k))];
-                    const geoSegments = geoOrder
-                      .filter(k => geo[k] > 0)
-                      .map(k => ({ key: k, pct: Math.max(2, Math.round((geo[k] / geoTotal) * 100)) }));
-
-                    return (
-                      <div key={id} style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
-                        {/* 柱状图 */}
-                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 42 }}>
-                          {bars.map((v, j) => (
-                            <div key={j} style={{
-                              flex: 1, height: `${toHeight(v)}%`,
-                              background: color,
-                              opacity: 0.4 + (j / bars.length) * 0.6,
-                              borderRadius: '1px 1px 0 0',
-                              transition: 'height 0.5s ease',
-                            }} />
-                          ))}
-                        </div>
-
-                        {/* 域名 + 最近更新时间 */}
-                        <span style={{ fontSize: 10, color: isActive ? color : '#666', textAlign: 'center', fontWeight: isActive ? 700 : 400, transition: 'color 0.5s' }}>
-                          {label}
-                        </span>
-                        {lastTime && (
-                          <span style={{ fontSize: 9, color: '#444', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {lastTime}
-                          </span>
-                        )}
-
-                        {/* 地区分布堆叠进度条 */}
-                        <div
-                          title={geoSegments.map(s => `${GEO_LABEL[s.key] ?? s.key} ${s.pct}%`).join('  ')}
+                title={activeTab === 'economy' ? "经济动态排名" : "热搜排行"}
+                icon={<TrendingUp size={14} />}
+                badge="实时 (SSE 推送)"
+                count={hotItems.length}
+                style={{ minHeight: 480 }}
+                actions={(
+                  <>
+                    {activeTab === 'economy' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
+                        <select
+                          value={economySubCategory}
+                          onChange={(e) => setEconomySubCategory(e.target.value)}
                           style={{
-                            display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden',
-                            background: 'rgba(255,255,255,0.06)',
-                            border: '1px solid rgba(255,255,255,0.08)',
-                            marginTop: 2,
+                            background: '#1a1a1a',
+                            color: '#fff',
+                            border: '1px solid #333',
+                            fontSize: 11,
+                            padding: '2px 6px',
+                            borderRadius: 2,
+                            cursor: 'pointer',
+                            outline: 'none'
                           }}
                         >
-                          {geoSegments.length > 0 ? geoSegments.map(({ key, pct }) => (
-                            <div key={key} style={{
-                              width: `${pct}%`,
-                              background: GEO_COLOR[key] ?? '#888',
-                              transition: 'width 0.6s ease',
-                              opacity: 0.85,
-                            }} />
-                          )) : (
-                            <div style={{ width: '100%', background: 'rgba(255,255,255,0.05)' }} />
-                          )}
-                        </div>
+                          <option value="all">全部动态</option>
+                          <option value="stock">股市/全球指数</option>
+                          <option value="finance">实时财经快讯</option>
+                          <option value="crypto">加密货币价格</option>
+                          <option value="futures">黄金/有色金属/大宗</option>
+                          <option value="quant">市场情绪/量化</option>
+                        </select>
+                      </div>
+                    )}
+                    {activeTab === 'technology' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
+                        <select
+                          value={techSubCategory}
+                          onChange={(e) => setTechSubCategory(e.target.value)}
+                          style={{
+                            background: '#1a1a1a',
+                            color: '#fff',
+                            border: '1px solid #333',
+                            fontSize: 11,
+                            padding: '2px 6px',
+                            borderRadius: 2,
+                            cursor: 'pointer',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="all">全部动态</option>
+                          <option value="oss">GitHub 项目趋势</option>
+                          <option value="tech_news">技术社区 & 新闻</option>
+                          <option value="ai_model">AI 模型更新</option>
+                          <option value="ai_dataset">AI 数据集更新</option>
+                          <option value="cyber">网络安全威胁</option>
+                          <option value="infra">基础设施状态</option>
+                        </select>
+                      </div>
+                    )}
+                    {activeTab === 'academic' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: '#666' }}>分类:</span>
+                        <select
+                          value={academicSubCategory}
+                          onChange={(e) => setAcademicSubCategory(e.target.value)}
+                          style={{
+                            background: '#1a1a1a',
+                            color: '#fff',
+                            border: '1px solid #333',
+                            fontSize: 11,
+                            padding: '2px 6px',
+                            borderRadius: 2,
+                            cursor: 'pointer',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="all">全部动态</option>
+                          <option value="paper">学术论文 (arXiv / HF / S2)</option>
+                          <option value="conference">学术会议</option>
+                          <option value="prediction">预测市场</option>
+                        </select>
+                      </div>
+                    )}
+                  </>
+                )}
+              >
+                <HotPanelItems items={hotItems.length > 0 ? hotItems : []} />
+              </PanelBox>
+            </div>
 
-                        {/* 图例 */}
-                        {geoSegments.length > 0 && (
-                          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'center' }}>
-                            {geoSegments.map(({ key, pct }) => (
-                              <span key={key} style={{ fontSize: 9, color: GEO_COLOR[key] ?? '#888', whiteSpace: 'nowrap' }}>
-                                {GEO_LABEL[key] ?? key}{pct}%
-                              </span>
+            {/* Sparkline / Activity row — 实时域活跃度 + 地区分布 */}
+            {(() => {
+              const DOMAIN_DEFS = [
+                { id: 'global', label: '地缘', color: '#ff5c00' },
+                { id: 'economy', label: '经济', color: '#3357FF' },
+                { id: 'technology', label: '科技', color: '#33FF57' },
+                { id: 'academic', label: '学术', color: '#c084fc' },
+              ];
+              // 地区颜色 & 标签
+              const GEO_COLOR: Record<string, string> = {
+                CN: '#f87171',   // 中国 · 红
+                US: '#60a5fa',   // 美国 · 蓝
+                Global: '#34d399', // 全球 · 绿
+                Other: '#fbbf24',  // 其他 · 黄
+              };
+              const GEO_LABEL: Record<string, string> = {
+                CN: '🇨🇳', US: '🇺🇸', Global: '🌐', Other: '…',
+              };
+
+              const allValues = DOMAIN_DEFS.flatMap(d => domainActivity[d.id] ?? []);
+              const globalMax = Math.max(...allValues, 1);
+              const toHeight = (v: number) => Math.max(5, Math.round((v / globalMax) * 90));
+
+              return (
+                <PanelBox
+                  title="域活跃度"
+                  icon={<BarChart2 size={14} />}
+                  badge="实时"
+                  badgeColor="#34d399"
+                  style={{ minHeight: 160, flexShrink: 0 }}
+                >
+                  <div style={{ display: 'flex', gap: 12, paddingTop: 6 }}>
+                    {DOMAIN_DEFS.map(({ id, label, color }) => {
+                      const bars = domainActivity[id] ?? Array(ACTIVITY_WINDOW).fill(0);
+                      const lastTime = domainLastUpdated[id];
+                      const isActive = bars[bars.length - 1] > 0;
+                      const geo = domainGeoDistribution[id] ?? {};
+                      const geoTotal = Object.values(geo).reduce((a, b) => a + b, 0) || 1;
+
+                      // 地区条带的顺序：CN > US > Global > Other
+                      const geoOrder = ['CN', 'US', 'Global', 'Other', ...Object.keys(geo).filter(k => !['CN', 'US', 'Global', 'Other'].includes(k))];
+                      const geoSegments = geoOrder
+                        .filter(k => geo[k] > 0)
+                        .map(k => ({ key: k, pct: Math.max(2, Math.round((geo[k] / geoTotal) * 100)) }));
+
+                      return (
+                        <div key={id} style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+                          {/* 柱状图 */}
+                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 42 }}>
+                            {bars.map((v, j) => (
+                              <div key={j} style={{
+                                flex: 1, height: `${toHeight(v)}%`,
+                                background: color,
+                                opacity: 0.4 + (j / bars.length) * 0.6,
+                                borderRadius: '1px 1px 0 0',
+                                transition: 'height 0.5s ease',
+                              }} />
                             ))}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </PanelBox>
-            );
-          })()}
 
-          {/* Alert bar */}
-          <div style={{ display: 'flex', gap: 8, padding: '10px 14px', background: 'rgba(255,68,68,0.06)', border: '1.5px solid rgba(255,68,68,0.25)', alignItems: 'center' }}>
-            <AlertTriangle size={14} style={{ color: '#f87171', flexShrink: 0 }} />
-            <span style={{ fontSize: 12, color: '#f87171', fontWeight: 700 }}>警告</span>
-            <span style={{ fontSize: 12, color: '#c9d1d9' }}>Twitter/X API 已超限额，相关舆情数据切换至缓存模式，时效性降低约 40 分钟。</span>
-          </div>
-        </main>
+                          {/* 域名 + 最近更新时间 */}
+                          <span style={{ fontSize: 10, color: isActive ? color : '#666', textAlign: 'center', fontWeight: isActive ? 700 : 400, transition: 'color 0.5s' }}>
+                            {label}
+                          </span>
+                          {lastTime && (
+                            <span style={{ fontSize: 9, color: '#444', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {lastTime}
+                            </span>
+                          )}
+
+                          {/* 地区分布堆叠进度条 */}
+                          <div
+                            title={geoSegments.map(s => `${GEO_LABEL[s.key] ?? s.key} ${s.pct}%`).join('  ')}
+                            style={{
+                              display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden',
+                              background: 'rgba(255,255,255,0.06)',
+                              border: '1px solid rgba(255,255,255,0.08)',
+                              marginTop: 2,
+                            }}
+                          >
+                            {geoSegments.length > 0 ? geoSegments.map(({ key, pct }) => (
+                              <div key={key} style={{
+                                width: `${pct}%`,
+                                background: GEO_COLOR[key] ?? '#888',
+                                transition: 'width 0.6s ease',
+                                opacity: 0.85,
+                              }} />
+                            )) : (
+                              <div style={{ width: '100%', background: 'rgba(255,255,255,0.05)' }} />
+                            )}
+                          </div>
+
+                          {/* 图例 */}
+                          {geoSegments.length > 0 && (
+                            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'center' }}>
+                              {geoSegments.map(({ key, pct }) => (
+                                <span key={key} style={{ fontSize: 9, color: GEO_COLOR[key] ?? '#888', whiteSpace: 'nowrap' }}>
+                                  {GEO_LABEL[key] ?? key}{pct}%
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </PanelBox>
+              );
+            })()}
+
+            {/* Alert bar */}
+            <div style={{ display: 'flex', gap: 8, padding: '10px 14px', background: 'rgba(255,68,68,0.06)', border: '1.5px solid rgba(255,68,68,0.25)', alignItems: 'center' }}>
+              <AlertTriangle size={14} style={{ color: '#f87171', flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: '#f87171', fontWeight: 700 }}>警告</span>
+              <span style={{ fontSize: 12, color: '#c9d1d9' }}>Twitter/X API 已超限额，相关舆情数据切换至缓存模式，时效性降低约 40 分钟。</span>
+            </div>
+          </main>
+        )}
+
 
         {/* ── Console right panel ── */}
         <aside style={{
