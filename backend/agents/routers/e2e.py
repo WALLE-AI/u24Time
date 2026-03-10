@@ -90,10 +90,10 @@ async def run_e2e(
     }
 
     async def _run():
-        from db.session import get_async_session_ctx
+        from db.session import get_async_session
         try:
             registry = get_subagent_registry()
-            async with get_async_session_ctx() as db:
+            async with get_async_session() as db:
                 coordinator = EndToEndCoordinator(
                     db_session=db,
                     llm=llm,

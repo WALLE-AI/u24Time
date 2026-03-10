@@ -6,6 +6,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const API_BASE = 'http://localhost:5001/agents/e2e';
 
+const DEFAULT_STAGES = [
+    { id: 'phase0_crawl', label: '1. 热点侦查' },
+    { id: 'phase1_align', label: '2. 数据对齐' },
+    { id: 'phase2_analysis', label: '3. 并行分析' },
+    { id: 'phase3_select', label: '4. 选题决策' },
+    { id: 'phase4_report', label: '5. IR 报告装订' },
+    { id: 'phase5_graph', label: '6. 知识图谱' },
+    { id: 'phase6_simulation', label: '7. 社会仿真' },
+    { id: 'phase7_predict', label: '8. 趋势预测' }
+];
+
 // ─────────────────────────────────────  Types
 interface AgentViewProps {
     onBack?: () => void;
@@ -30,6 +41,7 @@ export default function AgentView({ }: AgentViewProps) {
     const [progress, setProgress] = useState<number>(0);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [finalReport, setFinalReport] = useState<string>('');
+    const [stagesDef, setStagesDef] = useState<{ id: string, label: string }[]>(DEFAULT_STAGES);
 
     const logId = useRef(0);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -66,6 +78,7 @@ export default function AgentView({ }: AgentViewProps) {
         setProgress(0);
         setFinalReport('');
         setCurrentStage('initializing');
+        setStagesDef(DEFAULT_STAGES);
         setIsRunning(true);
 
         const actualTopic = topic === 'custom' ? customTopic : topic;
@@ -111,11 +124,13 @@ export default function AgentView({ }: AgentViewProps) {
             addLog('SYS', '建立脑机长连接 (EventSource Stream)', 'info');
         };
 
-        eventSource.onmessage = (event) => {
+        const handleEvent = (event: MessageEvent) => {
+            if (event.type === 'ping') return;
             try {
                 const data = JSON.parse(event.data);
+                const eventType = event.type === 'message' && data.event ? data.event : event.type;
 
-                switch (data.event) {
+                switch (eventType) {
                     case 'connected':
                         break;
 
@@ -133,6 +148,15 @@ export default function AgentView({ }: AgentViewProps) {
                         if (data.percent !== undefined) {
                             setProgress(data.percent);
                         }
+                        setStagesDef(prev => {
+                            if (!prev.find(s => s.id === data.stage)) {
+                                const formatLabel = (stageId: string) => {
+                                    return stageId.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                };
+                                return [...prev, { id: data.stage, label: `${prev.length + 1}. ${formatLabel(data.stage)}` }];
+                            }
+                            return prev;
+                        });
                         addLog('COORD', `进入阶段: ${data.stage} (${data.percent || 0}%)`, 'info');
                         break;
 
@@ -163,6 +187,12 @@ export default function AgentView({ }: AgentViewProps) {
                         setIsRunning(false);
                         eventSource.close();
                         break;
+                        
+                    case 'report_chunk':
+                        if (data.chunk) {
+                            setFinalReport(prev => prev + data.chunk);
+                        }
+                        break;
 
                     default:
                         // Generic log
@@ -172,6 +202,9 @@ export default function AgentView({ }: AgentViewProps) {
                 // handle malformed JSON
             }
         };
+
+        const events = ['connected', 'run_complete', 'stage_transition', 'subagent_log', 'subagent_start', 'subagent_complete', 'subagent_error', 'error', 'report_chunk', 'message'];
+        events.forEach(ev => eventSource.addEventListener(ev, handleEvent as EventListener));
 
         eventSource.onerror = () => {
             addLog('SYS', 'SSE 连接异常断开，可能后端推演已结束或崩溃', 'warning');
@@ -210,17 +243,6 @@ export default function AgentView({ }: AgentViewProps) {
             {active && <Loader2 size={12} className="animate-spin" style={{ color: '#ff5c00' }} />}
         </div>
     );
-
-    const stagesDef = [
-        { id: 'phase0_crawl', label: '1. 热点侦查' },
-        { id: 'phase1_align', label: '2. 数据对齐' },
-        { id: 'phase2_analysis', label: '3. 并行分析' },
-        { id: 'phase3_select', label: '4. 选题决策' },
-        { id: 'phase4_report', label: '5. IR 报告装订' },
-        { id: 'phase5_graph', label: '6. 知识图谱' },
-        { id: 'phase6_simulation', label: '7. 社会仿真' },
-        { id: 'phase7_predict', label: '8. 趋势预测' }
-    ];
 
     const currentStageIndex = stagesDef.findIndex(s => s.id === currentStage);
 

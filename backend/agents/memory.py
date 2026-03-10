@@ -347,15 +347,38 @@ def _open_db(db_path: str) -> sqlite3.Connection:
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
-    """创建三表架构 (若不存在)"""
+    """创建三表架构 (若不存在) 及迁移"""
+    cursor = conn.execute("PRAGMA table_info(files)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if columns and "collection" not in columns:
+        # Perform deep migration to add collection and new UNIQUE constraint
+        conn.executescript("""
+            CREATE TABLE files_new (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection  TEXT NOT NULL DEFAULT 'default',
+                path        TEXT NOT NULL,
+                source      TEXT NOT NULL DEFAULT 'long_term',
+                content_hash TEXT,
+                stored_at   REAL NOT NULL,
+                metadata    TEXT DEFAULT '{}',
+                UNIQUE(collection, path)
+            );
+            INSERT INTO files_new (id, path, source, content_hash, stored_at, metadata)
+            SELECT id, path, source, content_hash, stored_at, metadata FROM files;
+            DROP TABLE files;
+            ALTER TABLE files_new RENAME TO files;
+        """)
+
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS files (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            path        TEXT NOT NULL UNIQUE,
+            collection  TEXT NOT NULL DEFAULT 'default',
+            path        TEXT NOT NULL,
             source      TEXT NOT NULL DEFAULT 'long_term',
             content_hash TEXT,
             stored_at   REAL NOT NULL,
-            metadata    TEXT DEFAULT '{}'
+            metadata    TEXT DEFAULT '{}',
+            UNIQUE(collection, path)
         );
         CREATE TABLE IF NOT EXISTS chunks (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -374,9 +397,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             provider    TEXT NOT NULL,
             cached_at   REAL NOT NULL
         );
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
-            USING fts5(chunk_id UNINDEXED, content, prefix='2 3');
-
+        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+            chunk_id UNINDEXED, content,
+            tokenize="porter unicode61"
+        );
         CREATE INDEX IF NOT EXISTS ix_chunks_file_id ON chunks(file_id);
         CREATE INDEX IF NOT EXISTS ix_files_source ON files(source);
     """)
@@ -491,11 +515,21 @@ async def _create_embedding_provider() -> Optional[EmbeddingProvider]:
     """
     import os
     
+    def _env(key: str, default: str = "") -> str:
+        try:
+            from config import settings
+            val = getattr(settings, key, None)
+            if val is None and hasattr(settings, "model_extra") and isinstance(settings.model_extra, dict):
+                val = settings.model_extra.get(key)
+            return val or os.environ.get(key, default) or default
+        except Exception:
+            return os.environ.get(key, default) or default
+
     # 尝试 SiliconFlow
-    sf_key = os.environ.get("SILICONFLOW_API_KEY", "")
+    sf_key = _env("SILICONFLOW_API_KEY", "")
     if sf_key:
         try:
-            model = os.environ.get("SILICONFLOW_EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
+            model = _env("SILICONFLOW_EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
             p = SiliconFlowEmbeddingProvider(sf_key, model=model)
             await p.embed(["ping"])
             logger.info(f"MemoryIndexManager: 使用 SiliconFlow 嵌入 Provider (model={model})")
@@ -504,7 +538,7 @@ async def _create_embedding_provider() -> Optional[EmbeddingProvider]:
             logger.warning(f"MemoryIndexManager: SiliconFlow 嵌入不可用 — {e}, 尝试 OpenAI")
 
     # 尝试 OpenAI
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    openai_key = _env("OPENAI_API_KEY", "")
     if openai_key and openai_key.startswith("sk-"):
         try:
             p = OpenAIEmbeddingProvider(openai_key)
@@ -579,6 +613,7 @@ class MemoryIndexManager:
         metadata: Optional[dict] = None,
         source: str = "long_term",
         evergreen: bool = False,
+        collection: str = "default",
     ) -> int:
         """
         存储分析报告到记忆索引
@@ -592,43 +627,53 @@ class MemoryIndexManager:
         path = f"{source}/{topic}/{content_hash}"
         stored_at = meta["stored_at"]
 
+        import random
         async with self._lock:
-            try:
-                return await self._store_content(
-                    path=path, content=content, source=source,
-                    stored_at=stored_at, metadata=meta, content_hash=content_hash
-                )
-            except sqlite3.OperationalError as e:
-                if "readonly" in str(e).lower():
-                    logger.warning(f"MemoryIndexManager: SQLite 只读错误, 尝试重连 — {e}")
-                    await self._recover_readonly()
+            for attempt in range(5):
+                try:
                     return await self._store_content(
-                        path=path, content=content, source=source,
+                        collection=collection, path=path, content=content, source=source,
                         stored_at=stored_at, metadata=meta, content_hash=content_hash
                     )
-                raise
+                except sqlite3.OperationalError as e:
+                    err_msg = str(e).lower()
+                    if "locked" in err_msg or "busy" in err_msg:
+                        if attempt == 4:
+                            logger.error(f"MemoryIndexManager: 超过最大重试次数, DB 仍被锁定 — {e}")
+                            raise
+                        delay = (2 ** attempt) * 0.1 + random.uniform(0.01, 0.1)
+                        logger.warning(f"MemoryIndexManager: DB 锁定 (attempt {attempt+1}), {delay:.2f}s 后回退重试 — {e}")
+                        await asyncio.sleep(delay)
+                        continue
+                    if "readonly" in err_msg:
+                        if attempt > 0:
+                            raise
+                        logger.warning(f"MemoryIndexManager: SQLite 只读错误, 尝试重连 — {e}")
+                        await self._recover_readonly()
+                        continue
+                    raise
 
     async def _store_content(
-        self, path: str, content: str, source: str,
+        self, collection: str, path: str, content: str, source: str,
         stored_at: float, metadata: dict, content_hash: str
     ) -> int:
         """实际存储逻辑"""
         # 写入 files 表
-        cursor = self._db.execute(
+        self._db.execute(
             """
-            INSERT INTO files (path, source, content_hash, stored_at, metadata)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(path) DO UPDATE SET
+            INSERT INTO files (collection, path, source, content_hash, stored_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(collection, path) DO UPDATE SET
                 content_hash=excluded.content_hash,
                 stored_at=excluded.stored_at,
                 metadata=excluded.metadata
             """,
-            (path, source, content_hash, stored_at, json.dumps(metadata)),
+            (collection, path, source, content_hash, stored_at, json.dumps(metadata)),
         )
         self._db.commit()
 
         file_id = self._db.execute(
-            "SELECT id FROM files WHERE path=?", (path,)
+            "SELECT id FROM files WHERE collection=? AND path=?", (collection, path)
         ).fetchone()[0]
 
         # 分块
@@ -688,6 +733,7 @@ class MemoryIndexManager:
         enable_temporal_decay: bool = True,
         enable_mmr: bool = True,
         now_ts: Optional[float] = None,
+        collection: str = "default",
     ) -> list[MemorySearchResult]:
         """
         五步混合检索流水线:
@@ -708,12 +754,12 @@ class MemoryIndexManager:
 
         # Step 2A: FTS-only 降级路径
         if self._provider is None:
-            return await self._search_fts_only(keywords or [query], k, min_score)
+            return await self._search_fts_only(keywords or [query], k, min_score, collection)
 
         # Step 2B: 并行 BM25 + 向量检索
         keyword_results, vector_results = await asyncio.gather(
-            self._search_keyword(query, candidates),
-            self._search_vector(query, candidates),
+            self._search_keyword(query, candidates, collection),
+            self._search_vector(query, candidates, collection),
             return_exceptions=True,
         )
         if isinstance(keyword_results, Exception):
@@ -766,7 +812,7 @@ class MemoryIndexManager:
     # ── BM25 关键词搜索 ───────────────────────────────────────────────────────
 
     async def _search_keyword(
-        self, query: str, limit: int
+        self, query: str, limit: int, collection: str = "default"
     ) -> list[dict]:
         """FTS5 BM25 关键词搜索"""
         fts_query = _build_fts_query(query)
@@ -781,11 +827,11 @@ class MemoryIndexManager:
                 FROM chunks_fts
                 JOIN chunks c ON chunks_fts.chunk_id = c.chunk_id
                 JOIN files f ON c.file_id = f.id
-                WHERE chunks_fts MATCH ?
+                WHERE chunks_fts MATCH ? AND f.collection = ?
                 ORDER BY rank
                 LIMIT ?
                 """,
-                (fts_query, limit),
+                (fts_query, collection, limit),
             ).fetchall()
         except sqlite3.OperationalError as e:
             logger.warning(f"MemoryIndexManager: FTS 查询失败 — {e}")
@@ -809,7 +855,7 @@ class MemoryIndexManager:
 
     # ── 向量搜索 ──────────────────────────────────────────────────────────────
 
-    async def _search_vector(self, query: str, limit: int) -> list[dict]:
+    async def _search_vector(self, query: str, limit: int, collection: str = "default") -> list[dict]:
         """SQLite 向量 KNN 搜索 (余弦相似度)"""
         if not self._provider:
             return []
@@ -827,8 +873,9 @@ class MemoryIndexManager:
                    f.path, f.source, f.metadata
             FROM chunks c
             JOIN files f ON c.file_id = f.id
-            WHERE c.embedding IS NOT NULL
+            WHERE c.embedding IS NOT NULL AND f.collection = ?
             """,
+            (collection,)
         ).fetchall()
 
         scored = []
@@ -857,12 +904,12 @@ class MemoryIndexManager:
     # ── FTS-only 降级路径 ─────────────────────────────────────────────────────
 
     async def _search_fts_only(
-        self, terms: list[str], k: int, min_score: float
+        self, terms: list[str], k: int, min_score: float, collection: str = "default"
     ) -> list[MemorySearchResult]:
         """无嵌入 Provider 时纯 BM25 检索"""
         seen: dict[str, dict] = {}
         for term in terms:
-            rows = await self._search_keyword(term, k * 2)
+            rows = await self._search_keyword(term, k * 2, collection)
             for r in rows:
                 cid = r["chunk_id"]
                 if cid not in seen or r["score"] > seen[cid]["score"]:

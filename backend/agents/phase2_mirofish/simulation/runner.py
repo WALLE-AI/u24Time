@@ -12,6 +12,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from agents.config import agents_settings
+from utils.llm_client import LLMClient
 
 class SimulationState(BaseModel):
     simulation_id: str
@@ -27,10 +28,11 @@ class SimulationRunner:
     负责启动、停止和状态监控由 OASIS 驱动的仿真进程。
     需要 OASIS 环境依赖。
     """
-    def __init__(self):
+    def __init__(self, llm: Optional[LLMClient] = None):
         self._states: Dict[str, SimulationState] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
         self.default_max_rounds = agents_settings.OASIS_MAX_ROUNDS
+        self.llm = llm or LLMClient()
         
     async def start(self, simulation_id: str, platform: str = "parallel",
                     max_rounds: Optional[int] = None, graph_id: Optional[str] = None) -> SimulationState:
@@ -87,21 +89,51 @@ class SimulationRunner:
             except ImportError:
                 logger.warning("SimulationRunner: OASIS 未安装，进入降级演示模式")
                 
-            state.status_msg = "Running"
+            state.status_msg = "Running Subagent Sandbox"
+            
+            # Sentiment personas for the ReAct sandbox
+            personas = [
+                {"role": "positive", "prompt": "你是一个极度乐观的吃瓜群众，凡事往好的、积极的、建设性的方向想。"},
+                {"role": "negative", "prompt": "你是一个极度悲观且充满批判性的分析师，喜欢寻找逻辑漏洞和潜在危机。"},
+                {"role": "neutral", "prompt": "你是一个理性的中立观察者，只摆事实，不带偏见地总结两者争论。"}
+            ]
             
             # 模拟执行轮次
+            discussion_history = []
             while state.current_round < state.max_rounds and state.is_running:
-                # 【实际逻辑】：
-                # 1. simulator.step() 
-                # 2. 如果提供了 graph_id, 进行 Memory Context 交互
-                # 3. 统计本轮 agents 发言数 action_count
+                # [ReAct Simulation]
+                # 让带有不同 emotion_bias 的子代理对局
+                current_persona = personas[state.current_round % len(personas)]
+                logger.info(f"SimulationRunner: [{current_persona['role'].upper()}] Subagent 执行 第 {state.current_round+1} 轮推演")
                 
-                await asyncio.sleep(2.0)  # 演示用时间压缩 (真实中可能需要分钟级演算)
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        resp = await client.post(
+                            f"{self.llm.base_url}/chat/completions",
+                            headers={"Authorization": f"Bearer {self.llm.api_key}"},
+                            json={
+                                "model": self.llm.model,
+                                "messages": [
+                                    {"role": "system", "content": current_persona["prompt"]},
+                                    {"role": "user", "content": f"历史讨论：{discussion_history[-2:]}\n请提出新锐的观点（一句话）。"}
+                                ],
+                                "temperature": 0.5,
+                                "max_tokens": 100
+                            }
+                        )
+                        reply = resp.json()["choices"][0]["message"]["content"].strip()
+                except Exception:
+                    reply = "模拟观点生成中..."
+                    
+                discussion_history.append(f"{current_persona['role']}: {reply}")
+                await asyncio.sleep(1.0) # Rate limiting
                 
                 state.current_round += 1
-                state.actions_count += 5 # 假设每轮产生 5 个 action
+                state.actions_count += 1
+                state.status_msg = f"Last Action: [{current_persona['role'].upper()}] - {reply[:20]}..."
                 
-                if state.current_round % 10 == 0:
+                if state.current_round % 2 == 0:
                     logger.info(f"SimulationRunner: 仿真 {simulation_id} 进度: {state.current_round}/{state.max_rounds}")
                     
             if state.is_running:

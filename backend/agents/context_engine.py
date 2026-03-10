@@ -28,7 +28,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 from loguru import logger
 
@@ -66,16 +66,21 @@ class AgentMessage:
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: float = field(default_factory=time.time)
     is_heartbeat: bool = False
-    tool_use_id: Optional[str] = None    # 用于 tool_use / tool_result 配对
+    tool_use_id: Optional[str] = None    # 兼容字段
+    tool_call_id: Optional[str] = None   # OpenAI 规范: tool 消息需携带此 ID
+    tool_calls: Optional[list[dict]] = None # OpenAI 规范: assistant 消息可能携带此列表
     detail: Optional[str] = None         # tool_result 详情 (摘要时剥离)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "role": self.role,
             "content": self.content,
-            "message_id": self.message_id,
-            "timestamp": self.timestamp,
         }
+        if self.tool_calls:
+            d["tool_calls"] = self.tool_calls
+        if self.tool_call_id:
+            d["tool_call_id"] = self.tool_call_id
+        return d
 
 
 @dataclass
@@ -111,6 +116,34 @@ class IngestResult:
 @dataclass
 class IngestBatchResult:
     ingested_count: int
+
+
+# ─── 接口协议 ─────────────────────────────────────────────────────────────────
+
+@runtime_checkable
+class ContextEngine(Protocol):
+    """ContextEngine 接口协议 — 所有的上下文引擎必须实现此接口"""
+
+    @property
+    def messages(self) -> list[AgentMessage]: ...
+    
+    @property
+    def total_tokens(self) -> int: ...
+    
+    @property
+    def message_count(self) -> int: ...
+
+    async def bootstrap(self, session_file: str = "", prior_knowledge: Optional[str] = None) -> BootstrapResult: ...
+    async def ingest(self, message: AgentMessage, is_heartbeat: bool = False) -> IngestResult: ...
+    async def ingest_batch(self, messages: list[AgentMessage], is_heartbeat: bool = False) -> IngestBatchResult: ...
+    async def after_turn(self, pre_prompt_message_count: int = 0, token_budget: Optional[int] = None, is_heartbeat: bool = False, **kwargs) -> None: ...
+    async def assemble(self, token_budget: Optional[int] = None) -> AssembleResult: ...
+    async def compact(self, token_budget: Optional[int] = None, force: bool = False, custom_instructions: Optional[str] = None, compaction_target: str = "budget") -> CompactResult: ...
+    async def prepare_subagent_spawn(self, parent_session_key: str, child_session_key: str, ttl_ms: Optional[int] = None) -> dict: ...
+    async def on_subagent_ended(self, child_session_key: str, reason: str) -> None: ...
+    def get_compacted_summary(self) -> Optional[str]: ...
+    def clear(self) -> None: ...
+
 
 
 # ─── Token 估算 ────────────────────────────────────────────────────────────────
@@ -379,11 +412,11 @@ async def _summarize_in_stages(
     )
 
 
-# ─── 主类 ──────────────────────────────────────────────────────────────────────
+# ─── 核心引擎实现 ──────────────────────────────────────────────────────────────
 
-class AgentContext:
+class LegacyContextEngine:
     """
-    实现 ContextEngine 完整接口合约
+    实现 ContextEngine 完整接口合约的默认压实引擎
     注入 llm_summarize 可替换摘要后端
     """
 
@@ -701,6 +734,30 @@ async def _default_llm_summarize(
     return f"[Summary]\n{truncated}"
 
 
+# ─── 引擎注册表 (Registry Pattern) ──────────────────────────────────────────────
+
+_CONTEXT_ENGINES: dict[str, Callable[..., ContextEngine]] = {}
+
+def register_context_engine(name: str, factory: Callable[..., ContextEngine]) -> None:
+    """注册一个新的 ContextEngine 工厂"""
+    _CONTEXT_ENGINES[name] = factory
+
+
+def resolve_context_engine(name: str, **kwargs) -> ContextEngine:
+    """解析并实例化 Context Engine"""
+    factory = _CONTEXT_ENGINES.get(name)
+    if not factory:
+        logger.warning(f"ContextEngine '{name}' 未找到，回退至 'legacy'")
+        factory = _CONTEXT_ENGINES.get("legacy")
+        if not factory:
+            raise ValueError("严重错误：连 'legacy' 引擎也没有注册！")
+    return factory(**kwargs)
+
+
+# 注册默认引擎
+register_context_engine("legacy", lambda **kwargs: LegacyContextEngine(**kwargs))
+
+
 # ─── 工厂函数 ─────────────────────────────────────────────────────────────────
 
 def create_agent_context(
@@ -709,10 +766,12 @@ def create_agent_context(
     token_budget: int = DEFAULT_TOKEN_BUDGET,
     is_heartbeat: bool = False,
     llm_summarize: Optional[Callable] = None,
-) -> AgentContext:
-    """创建 AgentContext 实例"""
+    engine_name: str = "legacy",
+) -> ContextEngine:
+    """创建并解析 ContextEngine 实例 (向前兼容原先的 AgentContext)"""
     sid = session_id or str(uuid.uuid4())
-    return AgentContext(
+    return resolve_context_engine(
+        engine_name,
         session_id=sid,
         system_prompt=system_prompt,
         token_budget=token_budget,

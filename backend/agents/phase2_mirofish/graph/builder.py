@@ -10,6 +10,7 @@ from typing import Dict, Any, List
 from loguru import logger
 
 from agents.config import agents_settings
+from utils.llm_client import LLMClient
 
 class GraphBuilderService:
     """
@@ -17,10 +18,12 @@ class GraphBuilderService:
     必须提供 ZEP_API_KEY，且安装可选依赖 zep-cloud
     """
     
-    def __init__(self):
+    def __init__(self, llm: Optional[LLMClient] = None):
         self.api_key = agents_settings.ZEP_API_KEY
         self.client = None
         self._initialized = False
+        self.llm = llm or LLMClient()
+        self._simulated_graph_memory = {} # Fallback dynamic storage
 
     def _initialize(self):
         if self._initialized:
@@ -52,13 +55,17 @@ class GraphBuilderService:
         graph_id = name or f"graph_{int(time.time())}"
         
         if not self._initialized or not self.client:
-            logger.info(f"GraphBuilderService(Bypass): 模拟图谱构建任务 {graph_id}...")
-            # 旁路模式直接返回成功标志
+            logger.info(f"GraphBuilderService(Bypass): 模拟大模型特征提取并注入图谱 {graph_id}...")
+            # 提取图谱节点实体与关系 (Dynamic Graph Extraction)
+            extracted_edges = await self._extract_graph_edges(text)
+            self._simulated_graph_memory[graph_id] = extracted_edges
+            
             return {
                 "task_id": f"dummy_task_{graph_id}",
                 "graph_id": graph_id,
                 "status": "building",
-                "simulated": True
+                "simulated": True,
+                "edges": extracted_edges
             }
             
         logger.info(f"GraphBuilderService: 发起 Zep 构建任务 {graph_id}")
@@ -100,7 +107,15 @@ class GraphBuilderService:
         self._initialize()
         
         if not self._initialized or not self.client:
-            return {"nodes": [{"id": "NodeA", "label": "Person"}], "edges": [], "node_count": 1, "edge_count": 0, "simulated": True}
+            edges = self._simulated_graph_memory.get(graph_id, [])
+            nodes = list(set([e["from"] for e in edges] + [e["to"] for e in edges]))
+            return {
+                "nodes": [{"id": n, "label": "Entity"} for n in nodes] or [{"id": "NodeA", "label": "Person"}], 
+                "edges": edges, 
+                "node_count": len(nodes) or 1, 
+                "edge_count": len(edges), 
+                "simulated": True
+            }
             
         try:
             # 获取 Collection 下的抽取的实体边（取决于具体的 zep 版本 graph api 方法）
@@ -110,3 +125,30 @@ class GraphBuilderService:
         except Exception as e:
             logger.error(f"GraphBuilderService: 查询图谱出错: {e}")
             return {"nodes": [], "edges": [], "error": str(e)}
+
+    async def _extract_graph_edges(self, text: str) -> List[Dict[str, str]]:
+        """利用 LLM 动态抽取文本中的实体图谱脉络"""
+        prompt = (
+            "从以下文本中提取出最核心的 3 对实体关系，严格按照 JSON 数组格式返回，"
+            "每个对象包含 'from', 'to', 'relation' 三个字段。无需其他废话。\n"
+            f"文本：{text[:1000]}"
+        )
+        try:
+            import httpx, json
+            async with httpx.AsyncClient(timeout=30) as client:
+                res = await client.post(
+                    f"{self.llm.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.llm.api_key}"},
+                    json={
+                        "model": self.llm.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1
+                    }
+                )
+                content = res.json()["choices"][0]["message"]["content"]
+                # Clean up markdown JSON block if present
+                content = content.replace("```json", "").replace("```", "").strip()
+                return json.loads(content)
+        except Exception as e:
+            logger.warning(f"GraphBuilderService: 图谱关系抽取失败: {e}")
+            return [{"from": "Subject", "to": "Object", "relation": "RelatedTo"}]

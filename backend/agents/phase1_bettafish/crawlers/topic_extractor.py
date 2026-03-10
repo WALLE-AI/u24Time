@@ -11,6 +11,8 @@ from loguru import logger
 from utils.llm_client import LLMClient
 from crawler_engine.engine import CrawlerEngine
 from data_alignment.schema import CanonicalItem
+from agents.tools.web_fetch import WebFetchTool, WebFetchParams
+from agents.tools.base import ToolContext
 
 class TopicExtractor:
     def __init__(self, engine: CrawlerEngine, llm: LLMClient):
@@ -70,55 +72,79 @@ class TopicExtractor:
         )
 
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                payload = {
-                    "model": self._llm.model,
-                    "messages": [
-                        {"role": "system", "content": "You are a precise data extraction system. Output JSON array only."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.3,
-                }
-                
-                # Check if it's OpenAI to add response_format
-                if "openai" in self._llm.base_url or "api.openai.com" in self._llm.base_url:
-                    payload["response_format"] = {"type": "json_object"} # Some providers require wrapper object for json_object
+            # Call the standard self._llm.chat which handles provider switching cleanly
+            # First, check if texts are URLs
+            processed_texts = []
+            web_fetcher = WebFetchTool()
+            ctx = ToolContext(
+                session_id="topic_extractor",
+                message_id="topic_extractor",
+                agent="topic_extractor",
+                user_id="system"
+            )
+            
+            for text in texts:
+                if text.startswith("http://") or text.startswith("https://"):
+                    # Extract Markdown from URL
+                    try:
+                        logger.info(f"TopicExtractor: Fetching content parsing URL {text}")
+                        result = await web_fetcher.execute(WebFetchParams(url=text, format="markdown", use_jina=True), ctx)
+                        if result.output and not result.output.startswith("Error:"):
+                            # Only keep first 2000 chars of markdown to avoid bloating context
+                            processed_texts.append(f"Source URL: {text}\nContent Snippet: {result.output[:2000]}")
+                        else:
+                            processed_texts.append(text)
+                    except Exception as e:
+                        logger.warning(f"TopicExtractor: Failed to fetch {text}: {e}")
+                        processed_texts.append(text)
+                else:
+                    processed_texts.append(text)
+            
+            # Reconstruct prompt with processed texts (which might now be markdown summaries)
+            prompt = (
+                f"你是一个资深的新闻舆情分析师。下面是一组即时热搜标题或网页正文内容摘要。\n"
+                f"请从中提炼出当前最受关注的 {count} 个核心独立事件/实体关键词（名词为主）。\n"
+                f"要求：\n"
+                f"1. 主要是专有名词、人名、公司名、地名、事件简略名（如 'OpenAI'、'英伟达'、'中东冲突'、'A股'）。\n"
+                f"2. 中英混合皆可，去除无意义的语气词。\n"
+                f"3. 必须输出严格的 JSON 数组格式，例如: [\"词1\", \"词2\"...]\n\n"
+                f"内容列表：\n"
+                + "\n\n".join([f"--- Item ---\n{t}" for t in processed_texts])
+            )
 
-                response = await client.post(
-                    f"{self._llm.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self._llm.api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json=payload
-                )
-                response.raise_for_status()
-                data = response.json()
-                content = data["choices"][0]["message"]["content"].strip()
-                
-                # Clean up markdown JSON block if present
-                if content.startswith("```json"):
-                    content = content[7:]
-                if content.startswith("```"):
-                    content = content[3:]
-                if content.endswith("```"):
-                    content = content[:-3]
-                content = content.strip()
+            response = await self._llm.chat(
+                messages=[
+                    {"role": "system", "content": "You are a precise data extraction system. Output JSON array only."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+            
+            content = response.strip()
+            logger.debug(f"TopicExtractor Raw LLM Response: {content}")
+            
+            # Clean up markdown JSON block if present
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
 
-                try:
-                    # Parse as array
-                    result = json.loads(content)
-                    if isinstance(result, list):
-                        return result[:count]
-                    elif isinstance(result, dict):
-                        # Attempt to extract from a wrapper
-                        for k, v in result.items():
-                            if isinstance(v, list):
-                                return v[:count]
-                except json.JSONDecodeError:
-                    logger.error(f"TopicExtractor: LLM 返回的不是有效 JSON:\n{content}")
-                    
+            try:
+                # Parse as array
+                result = json.loads(content)
+                if isinstance(result, list):
+                    return result[:count]
+                elif isinstance(result, dict):
+                    # Attempt to extract from a wrapper
+                    for k, v in result.items():
+                        if isinstance(v, list):
+                            return v[:count]
+            except json.JSONDecodeError:
+                logger.error(f"TopicExtractor: LLM 返回的不是有效 JSON:\n{content}")
+                
             return []
             
         except Exception as e:

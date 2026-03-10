@@ -9,10 +9,13 @@ from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
+from dotenv import load_dotenv
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parent
 ENV_FILE: Path = PROJECT_ROOT / ".env"
+
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
 
 
 class Settings(BaseSettings):

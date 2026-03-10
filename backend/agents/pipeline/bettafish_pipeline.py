@@ -61,7 +61,7 @@ class BettaFishPipeline:
         self._query_agent.MAX_REFLECTIONS = max_reflections
         
         # Step 1: （可选）即时深度爬虫
-        # await self._crawler.crawl_all([query], platforms)
+        await self._crawler.crawl_all([query], platforms)
         
         # Step 2: 检索数据库中的相关 Canonical Items
         logger.info("BettaFishPipeline: 检索本地关联内容...")

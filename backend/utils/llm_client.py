@@ -425,10 +425,14 @@ class LLMClient:
         temperature: float = 0.7,
         max_tokens: int = 2048,
         provider: Optional[str] = None,
-    ) -> str:
+        tools: Optional[list[dict]] = None,
+        tool_choice: Optional[str | dict] = None,
+    ) -> str | dict:
         """
         通用对话接口 (E2E Coordinator / AgentContext 核心调用)
         自动路由 Provider + Fallback 链
+        
+        New (v2.1): 支持 tools 和 tool_choice，若有 tool_calls 则返回 dict
         """
         task_type = _parse_task(task or self._default_task)
         chain = (
@@ -441,7 +445,8 @@ class LLMClient:
         for provider_name in chain:
             try:
                 return await self._chat_one(
-                    provider_name, messages, task_type, temperature, max_tokens
+                    provider_name, messages, task_type, temperature, max_tokens, 
+                    tools=tools, tool_choice=tool_choice
                 )
             except Exception as e:
                 logger.warning(
@@ -528,7 +533,9 @@ class LLMClient:
         task_type: TaskType,
         temperature: float,
         max_tokens: int,
-    ) -> str:
+        tools: Optional[list[dict]] = None,
+        tool_choice: Optional[str | dict] = None,
+    ) -> str | dict:
         """尝试单个 Provider 调用 (openai SDK 优先, httpx 降级)"""
         cfg = _global_registry.get_config(provider_name)
         if not cfg:
@@ -537,15 +544,41 @@ class LLMClient:
         # 尝试 openai SDK
         client = _global_registry.get_client(provider_name)
         if client is not None:
-            resp = await client.chat.completions.create(
-                model=cfg.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            return resp.choices[0].message.content.strip()
+            kwargs = {
+                "model": cfg.model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if tools:
+                kwargs["tools"] = tools
+            if tool_choice:
+                kwargs["tool_choice"] = tool_choice
+
+            resp = await client.chat.completions.create(**kwargs)
+            msg = resp.choices[0].message
+            
+            # 如果有 tool_calls，返回结构化信息而不仅仅是 content
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                return {
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in msg.tool_calls
+                    ]
+                }
+                
+            return msg.content.strip()
 
         # 降级到 httpx
+        # 注意: httpx 降级暂不支持 tools。如果需要，可在 payload 中添加
         return await _httpx_chat(
             base_url=cfg.base_url,
             api_key=cfg.api_key,

@@ -88,7 +88,7 @@ class TopicSelectorAgent:
         weight_hotness: float = 0.5,
         weight_sentiment: float = 0.25,
         weight_event: float = 0.25,
-        min_score_threshold: float = 0.3,
+        min_score_threshold: float = 0.15,
         max_hotness: float = 100.0,
     ):
         self._w_hot       = weight_hotness

@@ -30,7 +30,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.context_engine import AgentContext, AgentMessage, create_agent_context
+from agents.context_engine import ContextEngine, AgentMessage, create_agent_context
 from agents.memory import MemoryIndexManager, get_memory_manager
 from agents.subagent_registry import SubagentRegistry, PhaseRunner, get_subagent_registry
 from agents.phase1_bettafish.topic_selector import (
@@ -224,7 +224,7 @@ class EndToEndCoordinator:
     # ── Phase 0: 话题爬取 ─────────────────────────────────────────────────────
 
     async def _phase0_crawl(
-        self, ctx: AgentContext, session_id: str, topic: str, is_heartbeat: bool
+        self, ctx: ContextEngine, session_id: str, topic: str, is_heartbeat: bool
     ) -> list[str]:
         async with PhaseRunner(self._registry, "phase0_crawl", session_id):
             if self._dispatcher:
@@ -253,7 +253,7 @@ class EndToEndCoordinator:
     # ── Phase 1: 数据对齐 ─────────────────────────────────────────────────────
 
     async def _phase1_align(
-        self, ctx: AgentContext, session_id: str,
+        self, ctx: ContextEngine, session_id: str,
         topics: list[str], is_heartbeat: bool
     ) -> list[dict]:
         async with PhaseRunner(self._registry, "phase1_align", session_id):
@@ -279,7 +279,7 @@ class EndToEndCoordinator:
     # ── Phase 2: 并行分析 ─────────────────────────────────────────────────────
 
     async def _phase2_analyze(
-        self, ctx: AgentContext, session_id: str,
+        self, ctx: ContextEngine, session_id: str,
         topic: str, items: list[dict], is_heartbeat: bool
     ) -> dict:
         async with PhaseRunner(self._registry, "phase2_analysis", session_id):
@@ -338,7 +338,7 @@ class EndToEndCoordinator:
     # ── Phase 3: 选题 ─────────────────────────────────────────────────────────
 
     async def _phase3_select(
-        self, ctx: AgentContext, session_id: str,
+        self, ctx: ContextEngine, session_id: str,
         topics: list[str], items: list[dict], is_heartbeat: bool
     ) -> SelectionResult:
         async with PhaseRunner(self._registry, "phase3_select", session_id):
@@ -360,7 +360,7 @@ class EndToEndCoordinator:
     # ── Phase 4: 报告生成 ─────────────────────────────────────────────────────
 
     async def _phase4_report(
-        self, ctx: AgentContext, session_id: str,
+        self, ctx: ContextEngine, session_id: str,
         topic: str, analysis: dict, is_heartbeat: bool
     ) -> dict:
         async with PhaseRunner(self._registry, "phase4_report", session_id):
@@ -389,7 +389,7 @@ class EndToEndCoordinator:
     # ── Phase 5: 图谱构建 ─────────────────────────────────────────────────────
 
     async def _phase5_graph(
-        self, ctx: AgentContext, session_id: str,
+        self, ctx: ContextEngine, session_id: str,
         topic: str, report: dict, is_heartbeat: bool
     ) -> dict:
         async with PhaseRunner(self._registry, "phase5_graph", session_id):
@@ -442,7 +442,7 @@ class EndToEndCoordinator:
     # ── Phase 7: 预测报告 ──────────────────────────────────────────────────────
 
     async def _phase7_predict(
-        self, ctx: AgentContext, session_id: str,
+        self, ctx: ContextEngine, session_id: str,
         topic: str, graph_result: dict, is_heartbeat: bool
     ) -> dict:
         async with PhaseRunner(self._registry, "phase7_predict", session_id):
@@ -457,21 +457,26 @@ class EndToEndCoordinator:
                 runner = SimulationRunner()
                 reporter = PredictionReportAgent(self._llm, graph, runner)
 
-                prediction = await reporter.generate(
-                    topic=topic,
+                prediction_content = ""
+                async for chunk in reporter.generate_report_stream(
+                    query=topic,
                     graph_id=graph_result.get("graph_task", {}).get("graph_id"),
                     simulation_id=session_id,
-                )
+                ):
+                    prediction_content += chunk
+                    if self._dispatcher:
+                        await self._dispatcher.dispatch("report_chunk", {"chunk": chunk}, run_id=session_id, is_heartbeat=is_heartbeat)
+                
+                prediction = {"content": prediction_content, "topic": topic}
+                
                 await ctx.ingest(
                     AgentMessage(role="assistant",
-                                 content=f"Phase 7 预测报告完成: {len(str(prediction))} 字"),
+                                 content=f"Phase 7 预测报告完成: {len(prediction_content)} 字"),
                     is_heartbeat=is_heartbeat,
                 )
                 if self._dispatcher:
                     await self._dispatcher.dispatch("subagent_log", {"source": "PredictionAgent", "content": "趋势预测报告生成完成, 正在归档记忆...", "type": "success"}, run_id=session_id, is_heartbeat=is_heartbeat)
-                return prediction if isinstance(prediction, dict) else {
-                    "content": str(prediction), "topic": topic
-                }
+                return prediction
             except Exception as e:
                 logger.error(f"Phase 7 失败: {e}")
                 return {
