@@ -1,9 +1,9 @@
 """
-å·¥å·éç½®ç®¡çæ¨¡å
+工具配置管理模块
 
-ä»ç¯å¢åéå è½½éç½®ï¼æä¾é»è®¤å¼ï¼éªè¯éç½®æææ§ã?
+从环境变量加载配置，提供默认值，验证配置有效性。
 
-åºäº Requirements 12.1-12.7 å®ç°ã?
+基于 Requirements 12.1-12.7 实现。
 """
 import os
 from typing import Optional, Any
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolConfig:
     """
-    å·¥å·éç½®ç±?
+    工具配置类
     
-    ä»ç¯å¢åéå è½½ææå·¥å·ç¸å³çéç½®ï¼æä¾é»è®¤å¼åéªè¯ã?
+    从环境变量加载所有工具相关的配置，提供默认值和验证。
     
     Attributes:
         # API Keys
@@ -29,38 +29,38 @@ class ToolConfig:
         exa_api_key: Exa Search API Key
         
         # Timeout Settings
-        default_timeout: é»è®¤è¶æ¶æ¶é´ï¼ç§ï¼?
-        web_search_timeout: Web Search è¶æ¶æ¶é´ï¼ç§ï¼?
-        web_fetch_timeout: Web Fetch è¶æ¶æ¶é´ï¼ç§ï¼?
-        browser_timeout: æµè§å¨æä½è¶æ¶æ¶é´ï¼ç§ï¼
-        bash_timeout: Bash å½ä»¤è¶æ¶æ¶é´ï¼ç§ï¼?
+        default_timeout: 默认超时时间（秒）
+        web_search_timeout: Web Search 超时时间（秒）
+        web_fetch_timeout: Web Fetch 超时时间（秒）
+        browser_timeout: 浏览器操作超时时间（秒）
+        bash_timeout: Bash 命令超时时间（秒）
         
         # Cache Settings
-        cache_ttl: ç¼å­ TTLï¼ç§ï¼?
-        cache_max_size: ç¼å­æå¤§æ¡ç®æ°
-        enable_cache: æ¯å¦å¯ç¨ç¼å­
+        cache_ttl: 缓存 TTL（秒）
+        cache_max_size: 缓存最大条目数
+        enable_cache: 是否启用缓存
         
         # Content Size Limits
-        max_content_size: æå¤§åå®¹å¤§å°ï¼å­èï¼?
-        max_search_results: æå¤§æç´¢ç»ææ°
-        max_file_size: æå¤§æä»¶å¤§å°ï¼å­èï¼?
+        max_content_size: 最大内容大小（字节）
+        max_search_results: 最大搜索结果数
+        max_file_size: 最大文件大小（字节）
         
         # Search Provider Priority
-        search_provider_priority: æç´¢æä¾åä¼åçº§åè¡¨
+        search_provider_priority: 搜索提供商优先级列表
         
         # Browser Settings
-        browser_max_sessions: æå¤§æµè§å¨ä¼è¯æ?
-        browser_idle_timeout: æµè§å¨ä¼è¯ç©ºé²è¶æ¶ï¼ç§ï¼
-        browser_headless: æ¯å¦ä½¿ç¨æ å¤´æ¨¡å¼
+        browser_max_sessions: 最大浏览器会话数
+        browser_idle_timeout: 浏览器会话空闲超时（秒）
+        browser_headless: 是否使用无头模式
         
         # Bash Settings
-        bash_max_sessions: æå¤?Bash ä¼è¯æ?
-        bash_idle_timeout: Bash ä¼è¯ç©ºé²è¶æ¶ï¼ç§ï¼?
+        bash_max_sessions: 最大 Bash 会话数
+        bash_idle_timeout: Bash 会话空闲超时（秒）
         
         # Security Settings
-        enable_ssrf_check: æ¯å¦å¯ç¨ SSRF æ£æ?
-        enable_content_wrapping: æ¯å¦å¯ç¨å¤é¨åå®¹åè£
-        enable_suspicious_detection: æ¯å¦å¯ç¨å¯çæ¨¡å¼æ£æµ?
+        enable_ssrf_check: 是否启用 SSRF 检查
+        enable_content_wrapping: 是否启用外部内容包装
+        enable_suspicious_detection: 是否启用可疑模式检测
     """
     
     # ========== API Keys ==========
@@ -108,13 +108,13 @@ class ToolConfig:
     @classmethod
     def from_env(cls) -> "ToolConfig":
         """
-        ä»ç¯å¢åéå è½½éç½?
+        从环境变量加载配置
         
-        è¯»åææç¸å³çç¯å¢åéï¼å¦ææªè®¾ç½®åä½¿ç¨é»è®¤å¼ã?
-        èªå¨éªè¯éç½®çæææ§ã?
+        读取所有相关的环境变量，如果未设置则使用默认值。
+        自动验证配置的有效性。
         
         Returns:
-            ToolConfig: éç½®å®ä¾
+            ToolConfig: 配置实例
         
         Example:
             >>> config = ToolConfig.from_env()
@@ -166,7 +166,7 @@ class ToolConfig:
         config.enable_content_wrapping = cls._get_bool_env("ENABLE_CONTENT_WRAPPING", True)
         config.enable_suspicious_detection = cls._get_bool_env("ENABLE_SUSPICIOUS_DETECTION", True)
         
-        # éªè¯éç½®
+        # 验证配置
         config.validate()
         
         return config
@@ -174,14 +174,14 @@ class ToolConfig:
     @staticmethod
     def _get_int_env(key: str, default: int) -> int:
         """
-        ä»ç¯å¢åéè·åæ´æ°å?
+        从环境变量获取整数值
         
         Args:
-            key: ç¯å¢åéå?
-            default: é»è®¤å?
+            key: 环境变量名
+            default: 默认值
         
         Returns:
-            int: ç¯å¢åéçæ´æ°å¼ï¼å¦ææ æåè¿åé»è®¤å?
+            int: 环境变量的整数值，如果无效则返回默认值
         """
         value = os.getenv(key)
         if value is None:
@@ -198,14 +198,14 @@ class ToolConfig:
     @staticmethod
     def _get_bool_env(key: str, default: bool) -> bool:
         """
-        ä»ç¯å¢åéè·åå¸å°å?
+        从环境变量获取布尔值
         
         Args:
-            key: ç¯å¢åéå?
-            default: é»è®¤å?
+            key: 环境变量名
+            default: 默认值
         
         Returns:
-            bool: ç¯å¢åéçå¸å°å¼ï¼å¦ææ æåè¿åé»è®¤å?
+            bool: 环境变量的布尔值，如果无效则返回默认值
         """
         value = os.getenv(key)
         if value is None:
@@ -224,14 +224,14 @@ class ToolConfig:
     
     def validate(self):
         """
-        éªè¯éç½®çæææ?
+        验证配置的有效性
         
-        æ£æ¥ææéç½®å¼æ¯å¦å¨åçèå´åï¼å¦ææ æåè®°å½è­¦åå¹¶ä½¿ç¨é»è®¤å¼ã?
+        检查所有配置值是否在合理范围内，如果无效则记录警告并使用默认值。
         
         Raises:
-            ValueError: å¦æéç½®ä¸¥éæ æï¼ç®åä»è®°å½è­¦åï¼?
+            ValueError: 如果配置严重无效（目前仅记录警告）
         """
-        # éªè¯è¶æ¶è®¾ç½®ï¼å¿é¡?> 0ï¼?
+        # 验证超时设置（必须 > 0）
         if self.default_timeout <= 0:
             logger.warning(f"Invalid default_timeout: {self.default_timeout}, using 30")
             self.default_timeout = 30
@@ -252,7 +252,7 @@ class ToolConfig:
             logger.warning(f"Invalid bash_timeout: {self.bash_timeout}, using 30")
             self.bash_timeout = 30
         
-        # éªè¯ç¼å­è®¾ç½®
+        # 验证缓存设置
         if self.cache_ttl <= 0:
             logger.warning(f"Invalid cache_ttl: {self.cache_ttl}, using 3600")
             self.cache_ttl = 3600
@@ -261,7 +261,7 @@ class ToolConfig:
             logger.warning(f"Invalid cache_max_size: {self.cache_max_size}, using 1000")
             self.cache_max_size = 1000
         
-        # éªè¯åå®¹å¤§å°éå¶
+        # 验证内容大小限制
         if self.max_content_size <= 0:
             logger.warning(f"Invalid max_content_size: {self.max_content_size}, using 5MB")
             self.max_content_size = 5 * 1024 * 1024
@@ -274,7 +274,7 @@ class ToolConfig:
             logger.warning(f"Invalid max_file_size: {self.max_file_size}, using 10MB")
             self.max_file_size = 10 * 1024 * 1024
         
-        # éªè¯ä¼è¯éå¶
+        # 验证会话限制
         if self.browser_max_sessions <= 0:
             logger.warning(f"Invalid browser_max_sessions: {self.browser_max_sessions}, using 5")
             self.browser_max_sessions = 5
@@ -291,7 +291,7 @@ class ToolConfig:
             logger.warning(f"Invalid bash_idle_timeout: {self.bash_idle_timeout}, using 1800")
             self.bash_idle_timeout = 1800
         
-        # éªè¯æç´¢æä¾åä¼åçº§
+        # 验证搜索提供商优先级
         if not self.search_provider_priority:
             logger.warning("Empty search_provider_priority, using default: ['exa', 'brave', 'ddgs']")
             self.search_provider_priority = ["exa", "brave", "ddgs"]
@@ -300,13 +300,13 @@ class ToolConfig:
     
     def get_api_key(self, provider: str) -> Optional[str]:
         """
-        è·åæå®æä¾åç API Key
+        获取指定提供商的 API Key
         
         Args:
-            provider: æä¾ååç§°ï¼brave, perplexity, xai, firecrawl, exaï¼?
+            provider: 提供商名称（brave, perplexity, xai, firecrawl, exa）
         
         Returns:
-            Optional[str]: API Keyï¼å¦ææªéç½®åè¿å?None
+            Optional[str]: API Key，如果未配置则返回 None
         
         Example:
             >>> config = ToolConfig.from_env()
@@ -332,28 +332,28 @@ class ToolConfig:
     
     def has_api_key(self, provider: str) -> bool:
         """
-        æ£æ¥æ¯å¦éç½®äºæå®æä¾åç API Key
+        检查是否配置了指定提供商的 API Key
         
         Args:
-            provider: æä¾ååç§?
+            provider: 提供商名称
         
         Returns:
-            bool: å¦æéç½®äº?API Key è¿å True
+            bool: 如果配置了 API Key 返回 True
         
         Example:
             >>> config = ToolConfig.from_env()
             >>> if config.has_api_key("brave"):
-            ...     # ä½¿ç¨ Brave Search
+            ...     # 使用 Brave Search
         """
         key = self.get_api_key(provider)
         return key is not None and len(key) > 0
     
     def to_dict(self) -> dict[str, Any]:
         """
-        å°éç½®è½¬æ¢ä¸ºå­å¸
+        将配置转换为字典
         
         Returns:
-            dict: éç½®å­å¸ï¼ä¸åå«ææä¿¡æ¯å¦?API Keysï¼?
+            dict: 配置字典（不包含敏感信息如 API Keys）
         
         Example:
             >>> config = ToolConfig.from_env()
@@ -404,22 +404,22 @@ class ToolConfig:
         }
 
 
-# å¨å±éç½®å®ä¾ï¼åä¾æ¨¡å¼ï¼
+# 全局配置实例（单例模式）
 _global_config: Optional[ToolConfig] = None
 
 
 def get_config() -> ToolConfig:
     """
-    è·åå¨å±éç½®å®ä¾
+    获取全局配置实例
     
-    ä½¿ç¨åä¾æ¨¡å¼ï¼ç¡®ä¿æ´ä¸ªåºç¨åªæä¸ä¸ªéç½®å®ä¾ã?
-    ç¬¬ä¸æ¬¡è°ç¨æ¶ä»ç¯å¢åéå è½½éç½®ã?
+    使用单例模式，确保整个应用只有一个配置实例。
+    第一次调用时从环境变量加载配置。
     
     Returns:
-        ToolConfig: å¨å±éç½®å®ä¾
+        ToolConfig: 全局配置实例
     
     Example:
-        >>> from agents.tools.config import get_config
+        >>> from app.agents.tools.config import get_config
         >>> config = get_config()
         >>> timeout = config.default_timeout
     """
@@ -434,12 +434,12 @@ def get_config() -> ToolConfig:
 
 def reload_config() -> ToolConfig:
     """
-    éæ°å è½½éç½®
+    重新加载配置
     
-    å¼ºå¶ä»ç¯å¢åééæ°å è½½éç½®ï¼ç¨äºéç½®æ´æ°åå·æ°ã?
+    强制从环境变量重新加载配置，用于配置更新后刷新。
     
     Returns:
-        ToolConfig: æ°çéç½®å®ä¾
+        ToolConfig: 新的配置实例
     
     Example:
         >>> import os

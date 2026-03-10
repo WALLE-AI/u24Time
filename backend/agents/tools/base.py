@@ -86,7 +86,7 @@ import logging
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from app.agents.file_processor import ProcessedFile
+    from agents.file_processor import ProcessedFile
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ logger = logging.getLogger(__name__)
 def rebuild_tool_context_model():
     """Rebuild ToolContext model after ProcessedFile is defined."""
     try:
-        from app.agents.file_processor import ProcessedFile
+        from agents.file_processor import ProcessedFile
         ToolContext.model_rebuild()
     except Exception as e:
         logger.warning(f"Failed to rebuild ToolContext model: {e}")

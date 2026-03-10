@@ -1,19 +1,19 @@
 """
-Web æç´¢å·¥å·ï¼ç»ä¸ Manager é©±å¨è·¯ç±çï¼
+Web 搜索工具（统一 Manager 驱动路由版）
 
-æ¶æï¼?
+架构：
   WebSearchTool.execute()
-    âââ _build_provider_manager()   æå»º Provider é¾ï¼æ?SEARCH_PROVIDER_PRIORITY ææå®?providerï¼?
-    âââ manager.search_with_fallback()  èªå¨éçº§æ§è¡æç´¢
-    âââ _fetch_and_assemble()       ç»ä¸ URL æå + Markdown ç»è£ï¼åªæ­¤ä¸ä»½ï¼
+    └── _build_provider_manager()   构建 Provider 链（按 SEARCH_PROVIDER_PRIORITY 或指定 provider）
+    └── manager.search_with_fallback()  自动降级执行搜索
+    └── _fetch_and_assemble()       统一 URL 抓取 + Markdown 组装（只此一份）
 
-æ¯æçæç´¢æä¾åï¼?
-  - exa        (EXA_API_KEY å¿é¡»)
-  - bocha      (BOCHA_API_KEY å¿é¡»)
-  - brave      (BRAVE_API_KEY å¿é¡»)
-  - perplexity (PERPLEXITY_API_KEY å¿é¡»)
-  - grok       (XAI_API_KEY å¿é¡»)
-  - ddgs       (æ é API Keyï¼åè´?Fallback)
+支持的搜索提供商：
+  - exa        (EXA_API_KEY 必须)
+  - bocha      (BOCHA_API_KEY 必须)
+  - brave      (BRAVE_API_KEY 必须)
+  - perplexity (PERPLEXITY_API_KEY 必须)
+  - grok       (XAI_API_KEY 必须)
+  - ddgs       (无需 API Key，免费 Fallback)
 """
 import re
 import asyncio
@@ -42,7 +42,7 @@ try:
 except ImportError:
     Exa = None
 
-# ========== ç¯å¢åé ==========
+# ========== 环境变量 ==========
 SEARCH_BACKEND = os.getenv("SEARCH_BACKEND", "exa")
 EXA_API_KEY = os.getenv("EXA_API_KEY")
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
@@ -51,47 +51,32 @@ XAI_API_KEY = os.getenv("XAI_API_KEY")
 BOCHA_API_KEY = os.getenv("BOCHA_API_KEY")
 
 
-# ========== åæ°æ¨¡å ==========
+# ========== 参数模型 ==========
 
 class WebSearchParams(BaseModel):
-    """Web æç´¢åæ° (OpenClaw å¯¹é½ç?"""
-    query: str = Field(..., description="Search query string.")
-    count: Optional[int] = Field(5, ge=1, le=10, description="Number of results to return (1-10).")
-    country: Optional[str] = Field(None, description="2-letter country code for region-specific results.")
-    language: Optional[str] = Field(None, description="ISO 639-1 language code for results.")
-    freshness: Optional[str] = Field(None, description="Filter by time: 'day' (24h), 'week', 'month', or 'year'.")
-    date_after: Optional[str] = Field(None, description="Only results published after this date (YYYY-MM-DD).")
-    date_before: Optional[str] = Field(None, description="Only results published before this date (YYYY-MM-DD).")
-    
-    # Brave specific
-    search_lang: Optional[str] = Field(None, description="Brave language code for search results.")
-    ui_lang: Optional[str] = Field(None, description="Locale code for UI elements.")
-    
-    # Perplexity specific
-    domain_filter: Optional[List[str]] = Field(None, description="Domain filter (max 20).")
-    max_tokens: Optional[int] = Field(None, ge=1, le=1000000)
-    max_tokens_per_page: Optional[int] = Field(None, ge=1)
-    
-    # Backward compatibility
-    query_or_url: Optional[str] = Field(None, description="Alias for query or a direct URL.")
-    num_results: Optional[int] = Field(None, description="Alias for count.")
-    provider: Optional[str] = Field(None, description="Specify search provider.")
+    """Web 搜索参数"""
+    query_or_url: str = Field(..., description="搜索查询 (例如: 'AI 最新进展') 或 直接 URL (例如: 'https://example.com')")
+    num_results: int = Field(default=5, description="返回结果数量 (仅当输入为查询时有效, 默认: 5)")
+    provider: Optional[str] = Field(default=None, description="指定搜索提供商 (brave, perplexity, grok, exa, ddgs, bocha)；不指定则按 SEARCH_PROVIDER_PRIORITY 自动选择")
+    country: Optional[str] = Field(default=None, description="国家代码 (用于 Brave Search, 例如: US, CN)")
+    search_lang: Optional[str] = Field(default=None, description="搜索语言 (用于 Brave Search, 例如: en, zh)")
+    freshness: Optional[str] = Field(default=None, description="时间过滤：pd=past day, pw=past week, pm=past month, py=past year。Brave/Bocha 均支持")
 
 
-# ========== æç´¢ç»ææ¨¡å ==========
+# ========== 搜索结果模型 ==========
 
 class SearchResult(BaseModel):
-    """æç´¢ç»æ"""
+    """搜索结果"""
     title: str
     url: str
     description: Optional[str] = None
     age: Optional[str] = None
 
 
-# ========== æç´¢æä¾åæ½è±¡åºç±?==========
+# ========== 搜索提供商抽象基类 ==========
 
 class SearchProvider(ABC):
-    """æç´¢æä¾åæ½è±¡åºç±?""
+    """搜索提供商抽象基类"""
 
     @abstractmethod
     async def search(
@@ -100,14 +85,14 @@ class SearchProvider(ABC):
         count: int = 5,
         **kwargs
     ) -> list[SearchResult]:
-        """æ§è¡æç´¢"""
+        """执行搜索"""
         pass
 
 
-# ========== Exa æç´¢æä¾å?==========
+# ========== Exa 搜索提供商 ==========
 
 class ExaSearchProvider(SearchProvider):
-    """Exa Search æä¾å?""
+    """Exa Search 提供商"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -118,7 +103,7 @@ class ExaSearchProvider(SearchProvider):
         count: int = 5,
         **kwargs
     ) -> list[SearchResult]:
-        """æ§è¡ Exa æç´¢"""
+        """执行 Exa 搜索"""
         if not Exa:
             raise ValueError("exa_py package not installed. Please run: uv add exa-py")
 
@@ -144,10 +129,10 @@ class ExaSearchProvider(SearchProvider):
         return results
 
 
-# ========== DuckDuckGo æç´¢æä¾å?==========
+# ========== DuckDuckGo 搜索提供商 ==========
 
 class DDGSSearchProvider(SearchProvider):
-    """DuckDuckGo Search æä¾åï¼åè´¹ Fallbackï¼?""
+    """DuckDuckGo Search 提供商（免费 Fallback）"""
 
     async def search(
         self,
@@ -155,11 +140,11 @@ class DDGSSearchProvider(SearchProvider):
         count: int = 5,
         **kwargs
     ) -> list[SearchResult]:
-        """æ§è¡ DuckDuckGo æç´¢ï¼å«ä¸­æåºå + æ¥æå¤çº§éçº§"""
+        """执行 DuckDuckGo 搜索，含中文区域 + 日期多级降级"""
         if DDGS is None:
             raise ValueError("ddgs package not installed. Please run: uv add ddgs")
 
-        # æ£æµä¸­æï¼è®¾ç½®åºå
+        # 检测中文，设置区域
         region = "cn-zh" if re.search(r'[\u4e00-\u9fff]', query) else "wt-wt"
 
         def _search_sync(q, r):
@@ -168,11 +153,11 @@ class DDGSSearchProvider(SearchProvider):
 
         results = await asyncio.to_thread(_search_sync, query, region)
 
-        # éçº§ 1: ä¸­ææ ç»æ?â?å¨çæç´¢
+        # 降级 1: 中文无结果 → 全球搜索
         if not results and region == "cn-zh":
             results = await asyncio.to_thread(_search_sync, query, "wt-wt")
 
-        # éçº§ 2: å«æ¥ææ ç»æ â?å»ææ¥æéæ
+        # 降级 2: 含日期无结果 → 去掉日期重搜
         if not results:
             date_pattern = r'\d{4}-\d{2}-\d{2}'
             if re.search(date_pattern, query):
@@ -195,10 +180,10 @@ class DDGSSearchProvider(SearchProvider):
         ]
 
 
-# ========== Brave æç´¢æä¾å?==========
+# ========== Brave 搜索提供商 ==========
 
 class BraveSearchProvider(SearchProvider):
-    """Brave Search æä¾å?""
+    """Brave Search 提供商"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -214,7 +199,7 @@ class BraveSearchProvider(SearchProvider):
         freshness: Optional[str] = None,
         **kwargs
     ) -> list[SearchResult]:
-        """æ§è¡ Brave æç´¢"""
+        """执行 Brave 搜索"""
         import httpx
 
         config = get_config()
@@ -257,10 +242,10 @@ class BraveSearchProvider(SearchProvider):
             return []
 
 
-# ========== Perplexity æç´¢æä¾å?==========
+# ========== Perplexity 搜索提供商 ==========
 
 class PerplexitySearchProvider(SearchProvider):
-    """Perplexity Search æä¾åï¼ä¹ç¨äº?Grok/xAIï¼?""
+    """Perplexity Search 提供商（也用于 Grok/xAI）"""
 
     def __init__(self, api_key: str, base_url: str = "https://api.perplexity.ai"):
         self.api_key = api_key
@@ -273,7 +258,7 @@ class PerplexitySearchProvider(SearchProvider):
         model: str = "sonar",
         **kwargs
     ) -> list[SearchResult]:
-        """æ§è¡ Perplexity æç´¢ï¼è¿å?AI æè¦ + å¼ç¨é¾æ¥"""
+        """执行 Perplexity 搜索，返回 AI 摘要 + 引用链接"""
         import httpx
 
         config = get_config()
@@ -324,10 +309,10 @@ class PerplexitySearchProvider(SearchProvider):
             return []
 
 
-# ========== Bocha æç´¢æä¾å?==========
+# ========== Bocha 搜索提供商 ==========
 
 class BochaSearchProvider(SearchProvider):
-    """Bocha Search æä¾åï¼åæ¥ï¼?""
+    """Bocha Search 提供商（博查）"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -340,7 +325,7 @@ class BochaSearchProvider(SearchProvider):
         freshness: Optional[str] = None,
         **kwargs
     ) -> list[SearchResult]:
-        """æ§è¡ Bocha æç´¢ï¼æ¯æ?freshness éä¼ """
+        """执行 Bocha 搜索，支持 freshness 透传"""
         import httpx
 
         config = get_config()
@@ -348,7 +333,7 @@ class BochaSearchProvider(SearchProvider):
 
         body = {
             "query": query,
-            "freshness": freshness if freshness else "noLimit",  # æ¯æè°ç¨æ¹ä¼ å?
+            "freshness": freshness if freshness else "noLimit",  # 支持调用方传入
             "summary": True,
             "count": count,
         }
@@ -381,17 +366,17 @@ class BochaSearchProvider(SearchProvider):
             return []
 
 
-# ========== æç´¢æä¾åç®¡çå¨ ==========
+# ========== 搜索提供商管理器 ==========
 
 class SearchProviderManager:
-    """æç´¢æä¾åç®¡çå¨"""
+    """搜索提供商管理器"""
 
     def __init__(self):
         self.providers: dict[str, SearchProvider] = {}
         self.priority: list[tuple[int, str]] = []
 
     def register(self, name: str, provider: SearchProvider, priority: int = 0):
-        """æ³¨åæä¾å?""
+        """注册提供商"""
         self.providers[name] = provider
         self.priority.append((priority, name))
         self.priority.sort(reverse=True)
@@ -402,7 +387,7 @@ class SearchProviderManager:
         count: int = 5,
         **kwargs
     ) -> tuple[list[SearchResult], str]:
-        """å¸¦éçº§çæç´¢ï¼æä¼åçº§ä¾æ¬¡å°è¯ï¼ç¬¬ä¸ä¸ªè¿åéç©ºç»æå³åæ­¢"""
+        """带降级的搜索：按优先级依次尝试，第一个返回非空结果即停止"""
         last_error = None
 
         for _, provider_name in self.priority:
@@ -426,14 +411,14 @@ class SearchProviderManager:
         return [], "none"
 
 
-# ========== Web æç´¢å·¥å·ä¸»ç±» ==========
+# ========== Web 搜索工具主类 ==========
 
 class WebSearchTool(Tool):
     """
-    é«çº§ Web æç´¢å·¥å·ï¼ç»ä¸ Manager é©±å¨è·¯ç±ï¼?
+    高级 Web 搜索工具（统一 Manager 驱动路由）
 
-    æ¯ææç´¢æ¥è¯¢åç´æ¥è®¿é?URLãä½¿ç?Playwright å¤çå¨æåå®¹ï¼å¹¶ä½¿ç?Readability æåæç« ä¸»ä½ã?
-    æææç´¢æä¾åç»ä¸ç»ç± SearchProviderManager è°åº¦ï¼æ¯æèªå¨éçº§ã?
+    支持搜索查询和直接访问 URL。使用 Playwright 处理动态内容，并使用 Readability 提取文章主体。
+    所有搜索提供商统一经由 SearchProviderManager 调度，支持自动降级。
     """
 
     @property
@@ -452,16 +437,16 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
 
     def _build_provider_manager(self, args: WebSearchParams) -> SearchProviderManager:
         """
-        æå»º SearchProviderManagerã?
+        构建 SearchProviderManager。
 
-        é»è¾ï¼?
-          - è?args.provider æå®äºå·ä½?provider â?åªæ³¨åè¯¥ä¸ä¸ªï¼ä¼åçº?100ï¼?
-          - å¦å â?è¯»å SEARCH_PROVIDER_PRIORITY ç¯å¢éç½®ï¼æ³¨åå¨é¨å¯ç?provider
+        逻辑：
+          - 若 args.provider 指定了具体 provider → 只注册该一个（优先级 100）
+          - 否则 → 读取 SEARCH_PROVIDER_PRIORITY 环境配置，注册全部可用 provider
         """
         manager = SearchProviderManager()
 
         if args.provider:
-            # ===== æå® Provider æ¨¡å¼ =====
+            # ===== 指定 Provider 模式 =====
             p = args.provider.lower()
             if p == "exa" and Exa and EXA_API_KEY:
                 manager.register("exa", ExaSearchProvider(EXA_API_KEY), priority=100)
@@ -475,15 +460,15 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
                 manager.register("grok", PerplexitySearchProvider(XAI_API_KEY, base_url="https://api.x.ai/v1"), priority=100)
             elif p == "ddgs" and DDGS is not None:
                 manager.register("ddgs", DDGSSearchProvider(), priority=100)
-            # æªå¹éï¼manager.providers ä¸ºç©ºï¼è°ç¨æ¹ä¼å¤çéè¯?
+            # 未匹配：manager.providers 为空，调用方会处理错误
             return manager
 
-        # ===== èªå¨ Provider é¾æ¨¡å¼ï¼æ?SEARCH_PROVIDER_PRIORITYï¼?====
+        # ===== 自动 Provider 链模式（按 SEARCH_PROVIDER_PRIORITY）=====
         config = get_config()
         priority_list = config.search_provider_priority  # e.g. ["exa", "bocha", "ddgs"]
 
         for i, name in enumerate(priority_list):
-            score = 100 - i * 10  # exa=100, bocha=90, ddgs=80 â?
+            score = 100 - i * 10  # exa=100, bocha=90, ddgs=80 …
             name = name.strip().lower()
             if name == "exa" and Exa and EXA_API_KEY:
                 manager.register("exa", ExaSearchProvider(EXA_API_KEY), priority=score)
@@ -498,7 +483,7 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
             elif name == "ddgs" and DDGS is not None:
                 manager.register("ddgs", DDGSSearchProvider(), priority=score)
 
-        # ååºï¼ç¡®ä¿èªå¨æ¨¡å¼ä¸è³å°æä¸ä¸?providerï¼DDGS åè´¹ï¼æ é Keyï¼?
+        # 兜底：确保自动模式下至少有一个 provider（DDGS 免费，无需 Key）
         if not manager.providers and DDGS is not None:
             print("[web_search] No configured provider available, falling back to DDGS")
             manager.register("ddgs", DDGSSearchProvider(), priority=0)
@@ -510,10 +495,10 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
         args: WebSearchParams,
         ctx: ToolContext,
     ) -> ToolResult:
-        """æ§è¡ Web æç´¢ææå?""
+        """执行 Web 搜索或抓取"""
         query_or_url = args.query_or_url.strip()
 
-        # å¤æ­æ?URL è¿æ¯æç´¢è¯?
+        # 判断是 URL 还是搜索词
         is_url = bool(re.match(r'^https?://', query_or_url.lower()))
 
         search_context = ""
@@ -522,11 +507,11 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
         if is_url:
             urls_to_visit = [query_or_url]
         else:
-            # ===== ç»ä¸ Manager æç´¢è·¯ç± =====
+            # ===== 统一 Manager 搜索路由 =====
             manager = self._build_provider_manager(args)
 
             if not manager.providers:
-                # æ²¡æä»»ä½å¯ç¨ provider
+                # 没有任何可用 provider
                 provider_label = args.provider or "(auto)"
                 return ToolResult(
                     title=f"Web search: {query_or_url}",
@@ -534,7 +519,7 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
                     metadata={"query": query_or_url, "provider": provider_label, "error": "provider_unavailable"}
                 )
 
-            # ç»è£æç´¢åæ°ï¼éä¼ ç»å providerï¼?
+            # 组装搜索参数（透传给各 provider）
             search_kwargs = {}
             if args.country:
                 search_kwargs["country"] = args.country
@@ -563,7 +548,7 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
                     metadata={"query": query_or_url}
                 )
 
-            # æ ¼å¼åæç´¢æè¦?
+            # 格式化搜索摘要
             search_context = f"### Search Results (via {provider_name.title()}):\n"
             for i, r in enumerate(results):
                 search_context += f"{i+1}. [{r.title}]({r.url})\n"
@@ -573,11 +558,11 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
                     search_context += f"   Age: {r.age}\n"
                 search_context += "\n"
 
-                # åå 2 ä¸ªææ?URL ç¨äºæ·±åº¦æå
+                # 取前 2 个有效 URL 用于深度抓取
                 if len(urls_to_visit) < 2 and r.url and r.url.startswith("http"):
                     urls_to_visit.append(r.url)
 
-        # ===== å¬å±æåæ¶å°¾ =====
+        # ===== 公共抓取收尾 =====
         return await self._fetch_and_assemble(
             query_or_url, urls_to_visit, search_context, is_url, ctx
         )
@@ -592,9 +577,9 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
         _depth: int = 0,
     ) -> ToolResult:
         """
-        å¹¶åæå URL åå®¹ï¼æå¤?2 ä¸ªï¼ï¼ç»è£æç»?Markdown è¾åºã?
+        并发抓取 URL 内容（最多 2 个），组装最终 Markdown 输出。
 
-        _depth: éå½æ·±åº¦ä¿æ¤ï¼æå¤éå½ 1 æ¬¡ï¼URL è®¿é®å¤±è´¥æ¶éçº§ä¸ºæç´¢ï¼?
+        _depth: 递归深度保护，最多递归 1 次（URL 访问失败时降级为搜索）
         """
         fetch_tool = WebFetchTool()
         fetched_contents = []
@@ -627,13 +612,13 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
                 else:
                     print(f"Fetch exception: {res}")
 
-        # URL ç´æ¥è®¿é®å¤±è´¥ â?éå½éçº§ä¸ºæç´¢ï¼æå¤?1 æ¬¡ï¼
+        # URL 直接访问失败 → 递归降级为搜索（最多 1 次）
         if not valid_urls and is_url and _depth == 0:
             fallback_query = re.sub(r'[^\w\s]', ' ', query).strip()
             if fallback_query:
                 return await self.execute(WebSearchParams(query_or_url=fallback_query), ctx)
 
-        # ç»è£ Markdown
+        # 组装 Markdown
         parts = []
         if search_context:
             parts.append(search_context)
@@ -644,7 +629,7 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
 
         markdown_content = "\n\n---\n\n".join(parts)
 
-        # ä¿å­å°ç£çå¤ä»½ï¼éé»å¤±è´¥ï¼?
+        # 保存到磁盘备份（静默失败）
         try:
             output_dir = Path("output/search_results")
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -655,7 +640,7 @@ Returns the extracted content in Markdown format, truncated to 30000 characters.
         except Exception:
             pass
 
-        # æªæ­è?30000 å­ç¬¦
+        # 截断至 30000 字符
         target_limit = 30000
         if len(markdown_content) > target_limit:
             markdown_content = markdown_content[:target_limit] + "\n\n... (Output truncated for brevity) ..."

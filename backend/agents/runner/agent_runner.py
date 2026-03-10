@@ -196,9 +196,9 @@ class AgentRunner:
                     else:
                         tool = self._tool_map[t_name]
                         try:
-                            # 统一调用 __call__ 入口 (包含验证、日志、策略)
-                            t_res: ToolResult = await tool(args_dict, t_ctx)
-                            res_content = str(t_res.output) if t_res.success else f"Error: {t_res.error}"
+                            # 统一调用 run 入口 (包含验证、日志、策略)
+                            t_res: ToolResult = await tool.run(args_dict, t_ctx)
+                            res_content = str(t_res.output) if getattr(t_res, "success", True) else f"Error: {getattr(t_res, 'error', 'Unknown Error')}"
                         except Exception as e:
                             logger.error(f"AgentRunner: 工具执行异常 {t_name} — {e}")
                             res_content = f"Error: Internal execution error - {str(e)}"
