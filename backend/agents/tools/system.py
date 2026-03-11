@@ -189,3 +189,126 @@ class NodesTool(Tool):
 
     async def execute(self, args: NodesToolParams, ctx: ToolContext) -> ToolResult:
         raise NotImplementedError("Phase 1: Tool definitions only")
+
+
+# ----------------------------------------------------------------------------
+# File System Tools
+# ----------------------------------------------------------------------------
+import os
+import json
+
+class ReadFileToolParams(BaseModel):
+    path: str = Field(description="Path to the file to read")
+
+class ReadFileTool(Tool):
+    @property
+    def id(self) -> str:
+        return "fs_read"
+    @property
+    def description(self) -> str:
+        return "Read the contents of a file."
+    @property
+    def parameters(self) -> Type[BaseModel]:
+        return ReadFileToolParams
+    async def execute(self, args: ReadFileToolParams, ctx: ToolContext) -> ToolResult:
+        base_dir = ctx.directory or os.getcwd()
+        target = os.path.abspath(os.path.join(base_dir, args.path))
+        if not target.startswith(os.path.abspath(base_dir)):
+            return ToolResult(output=json.dumps({"error": "Access denied"}), success=False, error="Security violation")
+        try:
+            with open(target, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return ToolResult(output=content, success=True)
+        except Exception as e:
+            return ToolResult(output=str(e), success=False, error=str(e))
+
+
+class WriteFileToolParams(BaseModel):
+    path: str = Field(description="Path to the file to write")
+    content: str = Field(description="Content to write to the file")
+
+class WriteFileTool(Tool):
+    @property
+    def id(self) -> str:
+        return "fs_write"
+    @property
+    def description(self) -> str:
+        return "Write content to a file."
+    @property
+    def parameters(self) -> Type[BaseModel]:
+        return WriteFileToolParams
+    async def execute(self, args: WriteFileToolParams, ctx: ToolContext) -> ToolResult:
+        base_dir = ctx.directory or os.getcwd()
+        target = os.path.abspath(os.path.join(base_dir, args.path))
+        if not target.startswith(os.path.abspath(base_dir)):
+            return ToolResult(output=json.dumps({"error": "Access denied"}), success=False, error="Security violation")
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, 'w', encoding='utf-8') as f:
+                f.write(args.content)
+            return ToolResult(output=json.dumps({"status": "success", "path": args.path}), success=True)
+        except Exception as e:
+            return ToolResult(output=str(e), success=False, error=str(e))
+
+
+class ListDirToolParams(BaseModel):
+    path: str = Field(default=".", description="Directory path to list")
+
+class ListDirTool(Tool):
+    @property
+    def id(self) -> str:
+        return "list_dir"
+    @property
+    def description(self) -> str:
+        return "List contents of a directory."
+    @property
+    def parameters(self) -> Type[BaseModel]:
+        return ListDirToolParams
+    async def execute(self, args: ListDirToolParams, ctx: ToolContext) -> ToolResult:
+        base_dir = ctx.directory or os.getcwd()
+        target = os.path.abspath(os.path.join(base_dir, args.path))
+        if not target.startswith(os.path.abspath(base_dir)):
+            return ToolResult(output=json.dumps({"error": "Access denied"}), success=False, error="Security violation")
+        try:
+            items = os.listdir(target)
+            return ToolResult(output=json.dumps({"items": items}), success=True)
+        except Exception as e:
+            return ToolResult(output=str(e), success=False, error=str(e))
+
+
+class SearchFileToolParams(BaseModel):
+    query: str = Field(description="String to search for in files")
+    path: str = Field(".", description="Directory to search in")
+
+class SearchFileTool(Tool):
+    @property
+    def id(self) -> str:
+        return "file_search"
+    @property
+    def description(self) -> str:
+        return "Search for a string pattern in files within a directory."
+    @property
+    def parameters(self) -> Type[BaseModel]:
+        return SearchFileToolParams
+    async def execute(self, args: SearchFileToolParams, ctx: ToolContext) -> ToolResult:
+        base_dir = ctx.directory or os.getcwd()
+        target_dir = os.path.abspath(os.path.join(base_dir, args.path))
+        if not target_dir.startswith(os.path.abspath(base_dir)):
+            return ToolResult(output=json.dumps({"error": "Access denied"}), success=False, error="Security violation")
+        
+        results = []
+        try:
+            for root, _, files in os.walk(target_dir):
+                for f in files:
+                    full_path = os.path.join(root, f)
+                    try:
+                        with open(full_path, "r", encoding="utf-8") as file:
+                            for idx, line in enumerate(file):
+                                if args.query in line:
+                                    rel_path = os.path.relpath(full_path, base_dir)
+                                    results.append({"file": rel_path, "line": idx+1, "content": line.strip()})
+                    except:
+                        pass
+            return ToolResult(output=json.dumps({"results": results}), success=True)
+        except Exception as e:
+            return ToolResult(output=str(e), success=False, error=str(e))

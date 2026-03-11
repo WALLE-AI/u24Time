@@ -429,7 +429,7 @@ class FileProcessor:
         if self.db is not None:
             try:
                 from sqlalchemy import select as sa_select
-                from app.models.file import File as FileModel
+                from models.file import File as FileModel
                 from urllib.parse import urlparse, unquote
                 import re as _re
 

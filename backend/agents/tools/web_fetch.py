@@ -108,7 +108,7 @@ Supports automatic HTML to Markdown conversion."""
         """HTML 转 Markdown"""
         if extract_target == "main_content":
             try:
-                from app.agents.tools.utils import ReadabilityExtractor
+                from agents.tools.utils import ReadabilityExtractor
                 extractor = ReadabilityExtractor()
                 extracted = extractor.extract_article(html)
                 if url:

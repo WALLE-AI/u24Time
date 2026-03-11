@@ -459,7 +459,7 @@ class Tool(ABC):
         
         # 参数验证成功后，开始日志记录
         # 导入日志记录器
-        from app.agents.tools.tool_logger import get_tool_logger
+        from agents.tools.tool_logger import get_tool_logger
         
         # 创建日志记录器（如果有数据库会话则使用）
         tool_logger = get_tool_logger(ctx.db)
